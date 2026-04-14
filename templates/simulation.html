@@ -1,0 +1,1411 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SIMULACIÓN DE IRRADIANCIA - Evolux</title>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+    <style>
+        body { font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1a252f; }
+        
+        .sidebar { width: 420px !important; }
+        
+        input[type="number"], input[type="text"], input[type="file"], select { 
+            font-size: 13px !important; 
+            padding: 6px !important; 
+        }
+
+        .panel h4 { text-transform: uppercase; font-size: 16px; font-weight: 900; letter-spacing: 0.5px; color: #1a252f; border-bottom: 2px solid var(--evolux-yellow); padding-bottom: 6px; margin-top: 0; }
+        .input-group label { display: block; font-size: 13px; margin-bottom: 5px; color: #1a252f; }
+        .input-group label strong { font-weight: 800; font-size: 14px;}
+        .input-group label span.normal-case { font-weight: normal; font-size: 13px; color: #555; }
+        
+        .workspace { display: flex !important; flex-direction: column !important; align-items: center; justify-content: flex-start; }
+        
+        .js-plotly-plot .plotly svg rect[data-index]:not([data-index="c"]) { display: none !important; pointer-events: none !important; }
+        .js-plotly-plot .plotly svg rect[data-index="c"] { cursor: move !important; }
+
+        .summary-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1);}
+        .summary-table th, .summary-table td { border: 1px solid #ddd; padding: 10px; text-align: center; vertical-align: middle; }
+        .summary-table th { background-color: var(--evolux-yellow); color: var(--evolux-black); font-weight: 800; text-transform: uppercase; font-size: 12px;}
+        
+        .depth-group { margin-bottom: 20px; width: 100%; background: white; border-radius: 8px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border: 1px solid #e1e1e1; box-sizing: border-box; }
+        .kd-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px; width: 100%; }
+        .kd-card { width: 100%; display: flex; flex-direction: column; align-items: center; background: #f8f9fa; border: 1px solid #ddd; padding: 15px; border-radius: 6px; box-sizing: border-box; }
+        .kd-card img { width: 100%; height: auto; max-width: 650px; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .kd-card-title { font-weight: 800; margin-bottom: 10px; color: var(--evolux-black); font-size: 15px; text-transform: uppercase;}
+        
+        .btn-download { background: var(--evolux-black); color: var(--evolux-yellow); padding: 8px 10px; border-radius: 4px; font-size: 12px; font-weight: bold; text-transform: uppercase; text-decoration: none; text-align: center; cursor: pointer; border: none; width: 100%; margin-bottom: 8px; display: block; transition: 0.2s;}
+        .btn-download:hover { opacity: 0.9; }
+        .btn-stop { background: #d9534f; color: white; border: none; padding: 8px 15px; font-size: 13px; font-weight: bold; border-radius: 4px; cursor: pointer; display: none; text-transform: uppercase; }
+        .btn-run { font-size: 13px; }
+        .btn-save, .btn-load { font-size: 13px !important; }
+
+        .separator { margin-top: 15px; border-top: 1px dashed #ccc; padding-top: 15px; }
+    </style>
+</head>
+<body>
+
+<header style="overflow-x: auto; overflow-y: hidden;">
+    <div style="display:flex; align-items:center; gap:15px; flex-shrink: 0;">
+        <img src="{{ url_for('static', filename='evolux-icon.png') }}" alt="Evolux" style="height: 30px; object-fit: contain;" onerror="this.style.display='none'">
+        <h2 style="margin:0; font-size: 18px; font-weight: 900; color: var(--evolux-yellow); letter-spacing: 1px; white-space: nowrap; flex-shrink: 0;">SIMULACIÓN DE IRRADIANCIA</h2>
+        <select id="mode-selector" class="mode-selector" onchange="applyModeSettings()" style="margin-left: 10px; flex-shrink: 0;">
+            <option value="estanque">ESTANQUE</option>
+            <option value="jaula">JAULA</option>
+        </select>
+    </div>
+    
+    <div style="display:flex; gap:10px; align-items:center; flex-shrink: 0;">
+        <span id="status-text" style="font-size:13px; color:#ccc; font-weight:bold; white-space: nowrap;">Listo</span>
+        <input type="file" id="config_input" accept=".json" style="display:none" onchange="loadConfiguration(event)">
+        <button type="button" class="btn-load" onclick="document.getElementById('config_input').click()">📂 Cargar</button>
+        <button type="button" class="btn-save" onclick="saveConfiguration()">💾 Guardar</button>
+        <button type="button" class="btn-run" id="btn_run" onclick="runSimulation(false)">▶ Simular</button>
+        <button type="button" class="btn-stop" id="btn_stop" onclick="stopSimulation()">⏹ Detener</button>
+    </div>
+</header>
+
+<div class="main-container">
+    
+    <div class="sidebar">
+        
+        <div class="panel">
+            <h4>GEOMETRÍA</h4>
+            <span style="font-size:12px; color:#666; display:block; margin-top:-5px; margin-bottom:10px;">*Para delimitar físicamente el entorno y dibujar simetrías.</span>
+            
+            <div class="input-group" id="env_z_container" style="display: none;">
+                <label><strong>Profundidad total Z</strong> <span class="normal-case">(m)</span></label>
+                <input type="number" id="env_z" value="15" step="0.5" onchange="updateScene()">
+            </div>
+
+            <div class="input-group">
+                <label><strong>Forma del espacio</strong></label>
+                <select id="env_shape" style="width: 100%; font-size:13px; margin-bottom: 5px;" onchange="toggleShapePanel()">
+                    <option value="circle">Circular (Radio)</option>
+                    <option value="rect">Rectangular (Largo y Ancho)</option>
+                </select>
+            </div>
+
+            <div id="shape_circle_inputs">
+                <div class="input-group">
+                    <label><strong>Radio</strong> <span class="normal-case">(m)</span></label>
+                    <input type="number" id="env_radio" value="20" step="0.5" onchange="updateScene()">
+                </div>
+            </div>
+            <div id="shape_rect_inputs" style="display: none;">
+                <div class="input-row">
+                    <div class="input-group">
+                        <label><strong>Largo X</strong> <span class="normal-case">(m)</span></label>
+                        <input type="number" id="env_x" value="40" step="0.5" onchange="updateScene()">
+                    </div>
+                    <div class="input-group">
+                        <label><strong>Ancho Y</strong> <span class="normal-case">(m)</span></label>
+                        <input type="number" id="env_y" value="40" step="0.5" onchange="updateScene()">
+                    </div>
+                </div>
+            </div>
+
+            <div class="separator">
+                <label style="font-weight: 800; font-size: 13px; color: #1f77b4; display:block; margin-bottom:5px;">Dibujar polígono de referencia</label>
+                <div class="input-row">
+                    <div class="input-group">
+                        <label><strong>Vértices</strong></label>
+                        <input type="number" id="poly_sides" value="0" min="0" placeholder="Ej: 6" onchange="updateScene()">
+                    </div>
+                    <div class="input-group">
+                        <label><strong>Distancia</strong> <span class="normal-case">(m)</span></label>
+                        <input type="number" id="poly_dist" value="0" step="0.5" placeholder="Ej: 10" onchange="updateScene()">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <h4 style="margin:0; border:none;">LÁMPARAS</h4>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <button type="button" onclick="document.getElementById('xml_input').click()" class="icon-btn" title="Subir archivo IES/XML">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line>
+                        </svg>
+                    </button>
+                    <button type="button" onclick="addLamp()" style="background:#eee; border:1px solid #ccc; cursor:pointer; padding: 6px 10px; border-radius: 3px; font-size:12px; font-weight:bold;">+ Añadir lámpara</button>
+                </div>
+            </div>
+            <input type="file" id="xml_input" accept=".xml, .ies" style="display:none" onchange="uploadXML(this)">
+            <div style="margin-bottom: 10px;">
+                <select id="lamp_model_selector" class="lamp-selector" style="width: 100%;"></select>
+            </div>
+            <div id="lamp-list"></div>
+        </div>
+
+        <div class="panel">
+            <h4>SIMULACIÓN Y RESULTADOS</h4>
+            
+            <div class="input-group" id="z_water_container">
+                <label><strong>Altura del agua</strong> <span class="normal-case">(cambio de medio)</span></label>
+                <input type="number" id="z_water" value="3.2" step="0.1" onchange="updateScene()">
+            </div>
+            
+            <div class="input-row" style="margin-top: 10px;">
+                <div class="input-group" id="env_n1_container">
+                    <label><strong>Índice ref. medio 1</strong> <span class="normal-case">(Aire)</span></label>
+                    <input type="number" id="env_n1" value="1.0" step="0.01" onchange="updateScene()">
+                </div>
+                <div class="input-group" id="env_n2_container">
+                    <label id="env_n2_label"><strong>Índice ref. medio 2</strong> <span class="normal-case">(Agua)</span></label>
+                    <input type="number" id="env_n2" value="1.33" step="0.01" onchange="updateScene()">
+                </div>
+            </div>
+
+            <div class="input-group" style="padding: 10px; background: #fdfdfd; border: 1px solid #ccc; border-radius: 4px; margin-top: 10px;">
+                <label><strong>Kd</strong> <span class="normal-case">(único o múltiples a comparar, separados por coma)</span></label>
+                <input type="text" id="kd_list" value="0.20, 0.35" oninput="updateSecchi()">
+                <div id="secchi_display" style="font-size:13px; color:#1f77b4; margin-top:6px; font-weight: bold;"></div>
+            </div>
+
+            <div class="input-group" style="margin-top: 12px;">
+                <label><strong>Rayos simulados</strong> <span class="normal-case">(Ray-Tracing)</span></label>
+                <input type="number" id="rays_count" value="50000" step="5000">
+            </div>
+
+            <div class="separator"></div>
+
+            <div class="input-group">
+                <label id="lbl_target_depths"><strong>Profundidades a graficar irradiancia</strong> <span class="normal-case">(metros, separadas por coma)</span></label>
+                <input type="text" id="target_depths" value="2.0, 1.0">
+            </div>
+
+            <div class="input-group" style="margin-top: 12px; padding: 10px; background: #fffae6; border: 1px solid var(--evolux-yellow); border-radius: 4px;">
+                <label style="color: var(--evolux-black); display: flex; align-items: center; gap: 6px;">
+                    <input type="checkbox" id="draw_contour" checked style="width:auto;"> <strong>Trazar isocurva límite</strong>
+                </label>
+                <div style="display: flex; gap: 10px; align-items: center; margin-top: 8px; padding-left: 20px;">
+                    <span style="font-size: 13px;">Valor mínimo:</span>
+                    <input type="number" id="contour_val" value="0.017" step="0.001" style="width: 80px;">
+                    <span style="font-size: 13px;">W/m²</span>
+                </div>
+            </div>
+
+            <!-- NUEVO PARÁMETRO: Escala de colores -->
+            <div class="input-group" style="margin-top: 10px; padding-left: 10px;">
+                <label><strong>Escala de colores (Mapas de calor)</strong></label>
+                <select id="color_scale_type" style="width: 100%; font-size:12px;">
+                    <option value="log">Logarítmica (Min: Límite Isocurva)</option>
+                    <option value="linear">Lineal (Min: 0 W/m²)</option>
+                </select>
+            </div>
+
+            <div class="separator"></div>
+
+            <div class="input-group" style="padding: 10px; background: #eef2f5; border: 1px solid #c8d4df; border-radius: 4px;">
+                <label style="color: #1f77b4; display: flex; align-items: center; gap: 6px;">
+                    <strong>Volumen de evaluación (ROI)</strong>
+                </label>
+                <span style="font-size:11px; color:#555; display:block; margin-bottom:8px;">Delimita los promedios y % volumen a esta área en 3D.</span>
+                
+                <select id="roi_type" style="width: 100%; margin-bottom: 8px; font-size:12px;" onchange="toggleRoiPanel()">
+                    <option value="global">Todo el espacio (Global)</option>
+                    <option value="paralelepipedo">Paralelepípedo</option>
+                    <option value="cilindro">Cilindro</option>
+                </select>
+
+                <div id="roi_paral_panel" style="display:none; margin-top: 10px;">
+                    <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:5px; margin-bottom:5px;">
+                        <div><label>Largo (X)</label><input type="number" id="roi_p_l" value="10" step="0.5" oninput="updateScene()"></div>
+                        <div><label>Ancho (Y)</label><input type="number" id="roi_p_w" value="10" step="0.5" oninput="updateScene()"></div>
+                        <div><label>Alto (Z)</label><input type="number" id="roi_p_h" value="5" step="0.5" oninput="updateScene()"></div>
+                    </div>
+                    <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:5px;">
+                        <div><label>Centro X</label><input type="number" id="roi_p_cx" value="10" step="0.5" oninput="updateScene()"></div>
+                        <div><label>Centro Y</label><input type="number" id="roi_p_cy" value="10" step="0.5" oninput="updateScene()"></div>
+                        <div><label>Centro Z</label><input type="number" id="roi_p_cz" value="2.5" step="0.5" oninput="updateScene()"></div>
+                    </div>
+                </div>
+
+                <div id="roi_cil_panel" style="display:none; margin-top: 10px;">
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:5px; margin-bottom:5px;">
+                        <div><label>Radio (m)</label><input type="number" id="roi_c_r" value="5" step="0.5" oninput="updateScene()"></div>
+                        <div><label>Alto (Z)</label><input type="number" id="roi_c_h" value="5" step="0.5" oninput="updateScene()"></div>
+                    </div>
+                    <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:5px;">
+                        <div><label>Centro X</label><input type="number" id="roi_c_cx" value="10" step="0.5" oninput="updateScene()"></div>
+                        <div><label>Centro Y</label><input type="number" id="roi_c_cy" value="10" step="0.5" oninput="updateScene()"></div>
+                        <div><label>Centro Z</label><input type="number" id="roi_c_cz" value="2.5" step="0.5" oninput="updateScene()"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="input-group" style="margin-top: 12px; padding: 10px; background: #e3f2fd; border: 1px solid #1f77b4; border-radius: 4px;">
+                <label style="color: #1f77b4;"><strong>Aporte lumínico por lámpara</strong> <span class="normal-case">(X,Y,Z separados por punto y coma)</span></label>
+                <input type="text" id="aporte_puntos" placeholder="Ej: 10,10,2; 15,15,1">
+                <span style="font-size:11px; color:#555; display:block; margin-top:4px;">Calcula % de irradiancia de cada lámpara en estos puntos.</span>
+            </div>
+
+            <div class="separator"></div>
+
+            <div class="input-group">
+                <label><strong>Opciones de tabla resumen</strong></label>
+                <div class="checklist-item"><input type="checkbox" id="col_lamps" checked style="width:auto;"><span class="normal-case">Lámparas utilizadas</span></div>
+                <div class="checklist-item"><input type="checkbox" id="col_pos" checked style="width:auto;"><span class="normal-case">Posiciones (X,Y,Z)</span></div>
+                <div class="checklist-item"><input type="checkbox" id="col_power" checked style="width:auto;"><span class="normal-case">Potencia eléctrica efectiva (W)</span></div>
+                <div class="checklist-item"><input type="checkbox" id="col_vol" checked style="width:auto;"><span class="normal-case">Volumen de luz cubierto (%)</span></div>
+            </div>
+
+            <div class="input-group" style="margin-top: 15px;">
+                <label><strong>Gráficos extra</strong></label>
+                <div class="checklist-item" style="flex-wrap: wrap;">
+                    <input type="checkbox" id="plot_depth_profile" checked style="width:auto;"> <span class="normal-case">Perfil volumétrico acumulado vs. prof.</span>
+                    <div style="display:inline-flex; align-items:center; gap:5px; margin-left:20px; margin-top:4px;">
+                        <span class="normal-case" style="font-size: 11px;">Paso (m):</span>
+                        <input type="number" id="profile_step" value="0.5" step="0.1" style="width: 50px; padding: 2px !important;">
+                    </div>
+                </div>
+                <div class="checklist-item" style="margin-top: 5px;">
+                    <input type="checkbox" id="plot_spectrum" onchange="toggleSpectrumPanel()" style="width:auto;"> <span class="normal-case">Espectro de lámparas</span>
+                </div>
+                <div id="spectrum_panel" style="display:none; margin-left: 20px; margin-top: 5px; padding: 10px; border-left: 2px solid var(--evolux-yellow); background: #fdfdfd;">
+                    <div style="font-size: 13px; margin-bottom: 5px;"><strong>Modelos:</strong></div>
+                    <div id="spectrum_lamp_list" style="margin-bottom: 10px; max-height: 80px; overflow-y: auto;"></div>
+                    <div style="font-size: 13px; margin-bottom: 5px;"><strong>Rangos (nm):</strong></div>
+                    <div style="display: flex; gap: 5px; font-size: 12px; margin-bottom: 3px; align-items: center;"><span style="color: #1f77b4; width: 40px; font-weight: bold;">Azul:</span> <input type="number" id="spec_b_min" value="400" style="width:55px;"> - <input type="number" id="spec_b_max" value="499" style="width:55px;"></div>
+                    <div style="display: flex; gap: 5px; font-size: 12px; margin-bottom: 3px; align-items: center;"><span style="color: #2ca02c; width: 40px; font-weight: bold;">Verde:</span> <input type="number" id="spec_g_min" value="500" style="width:55px;"> - <input type="number" id="spec_g_max" value="599" style="width:55px;"></div>
+                    <div style="display: flex; gap: 5px; font-size: 12px; align-items: center;"><span style="color: #d62728; width: 40px; font-weight: bold;">Rojo:</span> <input type="number" id="spec_r_min" value="600" style="width:55px;"> - <input type="number" id="spec_r_max" value="750" style="width:55px;"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel" style="border-left: 4px solid #1f77b4; background-color: #f4f8fb;">
+            <h4 style="color: #1f77b4; border-bottom: 2px solid #1f77b4;">MEDICIÓN Y COMPARACIÓN</h4>
+            <div class="input-group">
+                <label><strong>Archivo de medición</strong> <span class="normal-case">(.xlsx / .csv)</span></label>
+                <input type="file" id="meas_input" accept=".xlsx, .csv" onchange="handleMeasurementUpload(event)">
+            </div>
+            <div id="meas_status" style="font-size: 12px; color: green; margin-bottom: 10px; min-height: 14px;"></div>
+            <div class="input-group">
+                <label><strong>Seleccionar punto (X, Y)</strong> <span class="normal-case">a analizar</span></label>
+                <select id="meas_point_selector" style="width: 100%;"><option value="">Suba un archivo primero</option></select>
+            </div>
+            <button type="button" onclick="calcKdFromMeasurements()" class="btn-save" style="width: 100%; font-size: 12px; cursor: pointer; margin-bottom: 8px;">🧮 Calcular Kd</button>
+            <button type="button" onclick="runSimulation(true)" class="btn-save" style="width: 100%; background-color: var(--evolux-black); color: var(--evolux-yellow); border:none; font-size: 12px; cursor: pointer;">📊 Comparar medición y simulación en punto</button>
+        </div>
+
+    </div>
+
+    <div class="workspace" id="main_workspace">
+        
+        <div class="graph-wrapper" id="preview_wrapper" style="width: 100%; flex-shrink: 0; margin-bottom: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1);">
+            <div class="graph-title" style="display:flex; justify-content:space-between; align-items:center;">
+                <span>VISTA PREVIA INTERACTIVA DEL ESPACIO</span>
+                <div style="display: flex; gap: 15px; align-items: center;">
+                    <span style="font-size: 12px; font-weight: normal; color: #555;">Tamaño de lóbulo visual: <input type="range" id="beam_scale" min="1" max="30" value="8" style="vertical-align: middle; width:80px;" oninput="updateScene()"></span>
+                    <span id="preview_coords" style="font-size:12px; color:#1f77b4; font-weight:normal; background: #e3f2fd; padding: 4px 10px; border-radius: 12px;">📍 Haz clic en la cuadrícula para atrapar coordenada</span>
+                </div>
+            </div>
+            <div id="heatmap_div_preview" style="width: 100%; height: 500px;"></div>
+        </div>
+        
+        <div id="results_dynamic_area" style="display: flex; flex-direction: column; gap: 20px; width: 100%;"></div>
+    </div>
+    
+    <div class="right-sidebar" id="summary_container">
+        <h4 style="margin:0; border-bottom: 2px solid var(--evolux-yellow); padding-bottom: 5px;">DESCARGAS</h4>
+        <div id="downloads_container" style="display: flex; flex-direction: column; gap: 15px; margin-top: 15px;">
+            <div style="font-size: 12px; color: #666; text-align:center;">
+                Ejecute una simulación para habilitar las exportaciones.
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    window.measurements = [];
+    window.lastResults = null;
+    window.lampProfiles = {}; 
+    let lampCount = 0; 
+    let currentAbortController = null;
+
+    const modeConfigs = {
+        'estanque': { type: 'estanque', shape: 'circle', radio: 10, z_water: 3.2, env_z: 15.0, depths: '2.0, 1.0', kd_list: '0.20', n1: 1.0, n2: 1.33 },
+        'jaula': { type: 'jaula', shape: 'rect', env_x: 30, env_y: 30, z_water: 20.0, env_z: 15.0, depths: '5.0, 10.0, 15.0', kd_list: '0.50', n1: 1.0, n2: 1.33 }
+    };
+
+    let currentSpaceType = 'estanque';
+
+    function showStatusMessage(msg, color="var(--evolux-yellow)") {
+        const status = document.getElementById('status-text');
+        status.innerText = msg; status.style.color = color;
+        setTimeout(() => { status.innerText = "Listo"; status.style.color = "#ccc"; }, 4000);
+    }
+
+    async function fetchLampProfile(xml_name) {
+        if (!xml_name || window.lampProfiles[xml_name]) return;
+        try {
+            const res = await fetch('/api/lamp_profile/' + encodeURIComponent(xml_name));
+            const data = await res.json();
+            if (!data.error) {
+                window.lampProfiles[xml_name] = data;
+                updateScene(); 
+            }
+        } catch(e) { console.error("Error trayendo curva polar", e); }
+    }
+
+    function toggleRoiPanel() {
+        const type = document.getElementById('roi_type').value;
+        document.getElementById('roi_paral_panel').style.display = type === 'paralelepipedo' ? 'block' : 'none';
+        document.getElementById('roi_cil_panel').style.display = type === 'cilindro' ? 'block' : 'none';
+        updateScene();
+    }
+
+    function updateSecchi() {
+        const kdRaw = document.getElementById('kd_list').value;
+        const kds = kdRaw.split(',').map(v => parseFloat(v.trim())).filter(v => !isNaN(v) && v > 0);
+        const secchis = kds.map(kd => (1.7 / kd).toFixed(2) + 'm');
+        document.getElementById('secchi_display').innerHTML = secchis.length ? `Eq. Disco Secchi: ${secchis.join(' | ')}` : '';
+    }
+
+    function handleMeasurementUpload(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        showStatusMessage("Leyendo archivo...", "white");
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, {type: 'array'});
+                const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+                const json = XLSX.utils.sheet_to_json(worksheet, {header: 1, defval: null});
+                
+                let parsedData = [];
+                const pointsValidForKd = {}; 
+                let xIdx = -1, yIdx = -1, zIdx = -1, valIdx = -1, startRow = -1;
+
+                for (let i = 0; i < json.length; i++) {
+                    const row = json[i];
+                    if (!row || !row.length) continue;
+                    let tempX = -1, tempY = -1, tempZ = -1, tempVal = -1;
+                    for (let j = 0; j < row.length; j++) {
+                        let cell = String(row[j] || '').toLowerCase().trim();
+                        if (cell === 'x') tempX = j;
+                        else if (cell === 'y') tempY = j;
+                        else if (cell === 'z' || cell === 'profundidad' || cell === 'altura') tempZ = j;
+                        else if (cell.includes('w/m') || cell.includes('val') || cell.includes('irr') || cell === 'e') tempVal = j;
+                    }
+                    if (tempX !== -1 && tempY !== -1 && tempZ !== -1 && tempVal !== -1) {
+                        xIdx = tempX; yIdx = tempY; zIdx = tempZ; valIdx = tempVal; startRow = i + 1; break;
+                    }
+                }
+
+                if (startRow !== -1) {
+                    for (let i = startRow; i < json.length; i++) {
+                        const row = json[i];
+                        if (!row || row.length <= Math.max(xIdx, yIdx, zIdx, valIdx)) continue;
+                        let x = parseFloat(row[xIdx]), y = parseFloat(row[yIdx]), z = parseFloat(row[zIdx]), val = parseFloat(row[valIdx]);
+                        if (!isNaN(x) && !isNaN(y) && !isNaN(z) && !isNaN(val)) {
+                            parsedData.push({x, y, z, val});
+                            if (val > 0) {
+                                const ptKey = `${x},${y}`;
+                                if (!pointsValidForKd[ptKey]) pointsValidForKd[ptKey] = 0;
+                                pointsValidForKd[ptKey]++;
+                            }
+                        }
+                    }
+                }
+
+                if (parsedData.length > 0) {
+                    window.measurements = parsedData;
+                    document.getElementById('meas_status').innerText = `Cargados ${parsedData.length} puntos.`;
+                    
+                    const kdSelector = document.getElementById('meas_point_selector');
+                    kdSelector.innerHTML = '<option value="">Seleccione coordenada (X,Y)...</option>';
+                    let addedPoints = 0;
+                    Object.keys(pointsValidForKd).forEach(pt => {
+                        if (pointsValidForKd[pt] >= 2) {
+                            kdSelector.innerHTML += `<option value="${pt}">Punto X=${pt.split(',')[0]}, Y=${pt.split(',')[1]}</option>`;
+                            addedPoints++;
+                        }
+                    });
+                    if (addedPoints === 0) kdSelector.innerHTML = '<option value="">Ningún punto con pares válidos (>0 W/m²)</option>';
+                    updateScene(); showStatusMessage("Archivo listo");
+                } else {
+                    document.getElementById('meas_status').innerText = "Error: Columnas inválidas.";
+                }
+            } catch (err) { console.error(err); document.getElementById('meas_status').innerText = "Error al procesar."; }
+        };
+        reader.readAsArrayBuffer(file);
+    }
+
+    function calcKdFromMeasurements() {
+        const pt = document.getElementById('meas_point_selector').value;
+        if (!pt) { alert("Seleccione un punto válido."); return; }
+        const targetX = parseFloat(pt.split(',')[0]);
+        const targetY = parseFloat(pt.split(',')[1]);
+
+        fetch('/api/calc_kd', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ x: targetX, y: targetY, measurements: window.measurements })
+        }).then(r => r.json()).then(data => {
+            if (data.status === 'ok') {
+                const resArea = document.getElementById('results_dynamic_area');
+                let html = `<div class="graph-wrapper result-graph" style="border-top: 4px solid #1f77b4; width: 100%;">
+                                <div class="graph-title" style="color:#1f77b4;">Resultados Kd Empírico en (X=${targetX}, Y=${targetY})</div>
+                                <div style="display:flex; flex-direction:column; gap:5px; padding:10px;">`;
+                if (data.kds.length === 0) { html += `<div>No hay pares válidos.</div>`; } 
+                else {
+                    data.kds.forEach(r => {
+                        html += `<div style="background:#f8f9fa; padding:8px; border-radius:4px; border:1px solid #eee;">
+                                   Z=${r.z1}m ➔ Z=${r.z2}m: <strong>Kd = ${r.kd.toFixed(3)}</strong>
+                                 </div>`;
+                    });
+                }
+                html += `</div></div>`;
+                resArea.insertAdjacentHTML('afterbegin', html);
+            }
+        });
+    }
+
+    function applyModeSettings() {
+        const config = modeConfigs[document.getElementById('mode-selector').value] || modeConfigs['estanque'];
+        if(config) {
+            currentSpaceType = config.type;
+            document.getElementById('env_z').value = config.env_z;
+            
+            document.getElementById('env_shape').value = config.shape;
+
+            if(config.type === 'estanque') {
+                document.getElementById('env_z_container').style.display = 'none';
+                document.getElementById('env_radio').value = config.radio;
+                
+                document.getElementById('z_water_container').style.display = 'block';
+                document.getElementById('z_water').value = config.z_water;
+                document.getElementById('env_n1_container').style.display = 'block';
+                document.getElementById('env_n2_label').innerHTML = '<strong>Índice ref. medio 2</strong> <span class="normal-case">(Agua)</span>';
+            } else {
+                document.getElementById('env_z_container').style.display = 'block';
+                document.getElementById('env_x').value = config.env_x;
+                document.getElementById('env_y').value = config.env_y;
+                
+                document.getElementById('z_water_container').style.display = 'none';
+                document.getElementById('env_n1_container').style.display = 'none';
+                document.getElementById('env_n2_label').innerHTML = '<strong>Índice ref. medio</strong> <span class="normal-case">(Agua)</span>';
+            }
+            
+            toggleShapePanel();
+            
+            document.getElementById('kd_list').value = config.kd_list;
+            document.getElementById('target_depths').value = config.depths;
+            document.getElementById('env_n1').value = config.n1 || 1.0;
+            document.getElementById('env_n2').value = config.n2 || 1.33;
+            updateSecchi();
+            updateScene(); updateLampLabels();
+        }
+    }
+
+    function toggleShapePanel() {
+        const shape = document.getElementById('env_shape').value;
+        document.getElementById('shape_circle_inputs').style.display = shape === 'circle' ? 'block' : 'none';
+        document.getElementById('shape_rect_inputs').style.display = shape === 'rect' ? 'block' : 'none';
+        updateScene();
+    }
+
+    function toggleSpectrumPanel() {
+        document.getElementById('spectrum_panel').style.display = document.getElementById('plot_spectrum').checked ? 'block' : 'none';
+    }
+
+    function updateUniqueLampsForSpectrum() {
+        const container = document.getElementById('spectrum_lamp_list');
+        if (!container) return;
+        const uniqueLamps = new Set();
+        document.querySelectorAll('.lamp-xml').forEach(input => uniqueLamps.add(input.value));
+        const currentlyChecked = new Set();
+        container.querySelectorAll('.spectrum-lamp-cb:checked').forEach(cb => currentlyChecked.add(cb.value));
+        container.innerHTML = '';
+        if(uniqueLamps.size === 0) { container.innerHTML = '<span style="color:#999; font-size:12px;">Agregue lámparas primero</span>'; return; }
+        
+        uniqueLamps.forEach(lampXml => {
+            const isChecked = currentlyChecked.has(lampXml) || currentlyChecked.size === 0 ? 'checked' : '';
+            container.innerHTML += `<label style="display: flex; align-items: center; gap: 5px; font-size: 12px; margin-bottom: 3px; cursor: pointer;"><input type="checkbox" class="spectrum-lamp-cb" value="${lampXml}" ${isChecked} style="width:auto;"> <span class="normal-case">${lampXml}</span></label>`;
+            if (currentlyChecked.size === 0) currentlyChecked.add(lampXml);
+        });
+    }
+
+    function updateLampLabels() {
+        const txt = currentSpaceType === 'estanque' ? 'Altura desde el fondo (m)' : 'Profundidad (m)';
+        document.querySelectorAll('.z-label').forEach(lbl => lbl.innerHTML = `<strong>${txt}</strong>`);
+        const simLbl = document.getElementById('lbl_target_depths');
+        if (simLbl) simLbl.innerHTML = currentSpaceType === 'estanque' ? '<strong>Profundidades a graficar irradiancia</strong> <span class="normal-case">(metros desde el fondo, separadas por coma)</span>' : '<strong>Profundidades a graficar irradiancia</strong> <span class="normal-case">(metros, separadas por coma)</span>';
+    }
+
+    function getSpaceDimensions() {
+        const shape = document.getElementById('env_shape').value;
+        if (shape === 'circle') {
+            const r = parseFloat(document.getElementById('env_radio').value) || 20;
+            return { x: r * 2, y: r * 2, shape: 'circle', radius: r };
+        } else {
+            return { x: parseFloat(document.getElementById('env_x').value) || 40, y: parseFloat(document.getElementById('env_y').value) || 40, shape: 'rect' };
+        }
+    }
+
+    function getAxisTicks(maxVal) {
+        let labelStep = 1;
+        if (maxVal > 50) labelStep = 10;
+        else if (maxVal > 20) labelStep = 5;
+        else if (maxVal > 10) labelStep = 2;
+
+        let vals = [];
+        let texts = [];
+        for (let i = -1; i <= Math.ceil(maxVal) + 1; i++) {
+            vals.push(i);
+            texts.push(i % labelStep === 0 ? i.toString() : '');
+        }
+        return { vals, texts };
+    }
+
+    function getPlotTraces() {
+        const traces = [];
+        const dims = getSpaceDimensions();
+
+        const bgSize = 20;
+        const zBg = Array(bgSize).fill().map(() => Array(bgSize).fill(0));
+        const xBg = Array.from({length: bgSize}, (_, i) => (i / (bgSize-1)) * dims.x);
+        const yBg = Array.from({length: bgSize}, (_, i) => (i / (bgSize-1)) * dims.y);
+        
+        traces.push({
+            z: zBg, x: xBg, y: yBg, type: 'heatmap', showscale: false,
+            colorscale: [[0, 'rgba(0,0,0,0)'], [1, 'rgba(0,0,0,0)']], hoverinfo: 'none', name: 'Fondo'
+        });
+
+        if (dims.shape === 'circle') {
+            let cx = dims.x / 2, cy = dims.y / 2, r = dims.radius;
+            let bx = [], by = [];
+            for(let i=0; i<=100; i++) {
+                let angle = i * 2 * Math.PI / 100;
+                bx.push(cx + r * Math.cos(angle));
+                by.push(cy + r * Math.sin(angle));
+            }
+            traces.push({x: bx, y: by, mode: 'lines', line: {color: 'rgba(255, 199, 44, 1)', width: 2, dash: 'dash'}, hoverinfo: 'none', showlegend: false, name: 'Límite Estanque'});
+        } else {
+            traces.push({x: [0, dims.x, dims.x, 0, 0], y: [0, 0, dims.y, dims.y, 0], mode: 'lines', line: {color: 'rgba(255, 199, 44, 1)', width: 2, dash: 'dash'}, hoverinfo: 'none', showlegend: false, name: 'Límite Jaula'});
+        }
+
+        let roiType = document.getElementById('roi_type').value;
+        if (roiType === 'paralelepipedo') {
+            let cx = parseFloat(document.getElementById('roi_p_cx').value) || 0;
+            let cy = parseFloat(document.getElementById('roi_p_cy').value) || 0;
+            let l = parseFloat(document.getElementById('roi_p_l').value) || 0;
+            let w = parseFloat(document.getElementById('roi_p_w').value) || 0;
+            traces.push({x: [cx-l/2, cx+l/2, cx+l/2, cx-l/2, cx-l/2], y: [cy-w/2, cy-w/2, cy+w/2, cy+w/2, cy-w/2], mode: 'lines', line: {color: 'rgba(214, 39, 40, 0.8)', width: 2, dash: 'dashdot'}, hoverinfo: 'none', showlegend: false, name: 'ROI'});
+        } else if (roiType === 'cilindro') {
+            let cx = parseFloat(document.getElementById('roi_c_cx').value) || 0;
+            let cy = parseFloat(document.getElementById('roi_c_cy').value) || 0;
+            let r = parseFloat(document.getElementById('roi_c_r').value) || 0;
+            let bx = [], by = [];
+            for(let i=0; i<=50; i++) {
+                let angle = i * 2 * Math.PI / 50;
+                bx.push(cx + r * Math.cos(angle));
+                by.push(cy + r * Math.sin(angle));
+            }
+            traces.push({x: bx, y: by, mode: 'lines', line: {color: 'rgba(214, 39, 40, 0.8)', width: 2, dash: 'dashdot'}, hoverinfo: 'none', showlegend: false, name: 'ROI'});
+        }
+
+        let numSides = parseInt(document.getElementById('poly_sides').value) || 0;
+        let polyDist = parseFloat(document.getElementById('poly_dist').value) || 0;
+        if (numSides >= 3 && polyDist > 0) {
+            let cx = dims.x / 2, cy = dims.y / 2;
+            let px = [], py = [];
+            for (let i = 0; i <= numSides; i++) {
+                let angle = (i * 2 * Math.PI) / numSides - Math.PI / 2; 
+                px.push(cx + polyDist * Math.cos(angle));
+                py.push(cy + polyDist * Math.sin(angle));
+            }
+            traces.push({ x: px, y: py, mode: 'lines', line: { color: 'rgba(31, 119, 180, 0.8)', width: 1.5, dash: 'dot' }, hoverinfo: 'none', showlegend: false, name: 'Polígono Ref.' });
+        }
+
+        const lampX = [], lampY = [], lampText = [];
+        
+        document.querySelectorAll('.lamp-item').forEach((item, index) => {
+            let x = parseFloat(item.querySelector('.lamp-x').value) || 0;
+            let y = parseFloat(item.querySelector('.lamp-y').value) || 0;
+            let rx = parseFloat(item.querySelector('.lamp-rot-x').value) || 0;
+            let ry = parseFloat(item.querySelector('.lamp-rot-y').value) || 0;
+            let rz = parseFloat(item.querySelector('.lamp-rot-z').value) || 0;
+            let xml = item.querySelector('.lamp-xml').value;
+
+            lampX.push(x); lampY.push(y); lampText.push(`L${index + 1}`);
+
+            let profile = window.lampProfiles[xml];
+            if (profile) {
+                const VISUAL_SCALE = parseFloat(document.getElementById('beam_scale').value) || 8.0; 
+                const radX = rx * Math.PI / 180, radY = ry * Math.PI / 180, radZ = rz * Math.PI / 180;
+                const cosX = Math.cos(radX), sinX = Math.sin(radX);
+                const cosY = Math.cos(radY), sinY = Math.sin(radY);
+                const cosZ = Math.cos(radZ), sinZ = Math.sin(radZ);
+
+                function projectPlane(planeData, isC90) {
+                    let ptsX = [], ptsY = [];
+                    for (let i=0; i < planeData.theta.length; i++) {
+                        let theta = planeData.theta[i] * Math.PI / 180;
+                        let r = planeData.rad[i] * VISUAL_SCALE;
+                        let lx = 0, lz = 0, ly = 0; 
+                        
+                        if (!isC90) {
+                            lx = r * Math.sin(theta);
+                            lz = -r * Math.cos(theta);
+                        } else {
+                            ly = r * Math.sin(theta);
+                            lz = -r * Math.cos(theta);
+                        }
+
+                        let y1 = ly * cosX - lz * sinX;
+                        let z1 = ly * sinX + lz * cosX;
+                        let x1 = lx * cosY + z1 * sinY;
+                        let x2 = x1 * cosZ - y1 * sinZ;
+                        let y2 = x1 * sinZ + y1 * cosZ;
+                        
+                        ptsX.push(x + x2); ptsY.push(y + y2);
+                    }
+                    return {x: ptsX, y: ptsY};
+                }
+                
+                let p0 = projectPlane(profile.c0_180, false);
+                let p90 = projectPlane(profile.c90_270, true);
+
+                traces.push({
+                    x: p0.x, y: p0.y, mode: 'lines', fill: 'toself',
+                    fillcolor: 'rgba(255, 199, 44, 0.25)', line: {color: 'rgba(255, 199, 44, 0.8)', width: 2},
+                    hoverinfo: 'none', showlegend: false, name: `L${index+1} C0`
+                });
+
+                traces.push({
+                    x: p90.x, y: p90.y, mode: 'lines', fill: 'toself',
+                    fillcolor: 'rgba(31, 119, 180, 0.15)', line: {color: 'rgba(31, 119, 180, 0.8)', width: 2, dash: 'dot'},
+                    hoverinfo: 'none', showlegend: false, name: `L${index+1} C90`
+                });
+            } else {
+                fetchLampProfile(xml);
+            }
+        });
+
+        traces.push({ 
+            x: lampX, y: lampY, mode: 'text', type: 'scatter', name: 'Lámparas_Texto', 
+            text: lampText, textposition: 'top right', textfont: { color: 'var(--evolux-black)', size: 14, weight: 'bold' }, 
+            hoverinfo: 'none', showlegend: false 
+        });
+
+        if (window.measurements && window.measurements.length > 0) {
+            const measX = [], measY = [];
+            window.measurements.forEach(m => { measX.push(m.x); measY.push(m.y); });
+            traces.push({ 
+                x: measX, y: measY, mode: 'markers', type: 'scatter', name: 'Mediciones', 
+                marker: { size: 8, color: '#1f77b4', symbol: 'diamond', line: { color: 'white', width: 1 } }, 
+                hoverinfo: 'none', showlegend: false 
+            });
+        }
+
+        let aporteStr = document.getElementById('aporte_puntos').value;
+        if (aporteStr.trim()) {
+            let apX=[], apY=[];
+            aporteStr.split(';').forEach(part => {
+                let c = part.split(',');
+                if (c.length === 3 && !isNaN(parseFloat(c[0])) && !isNaN(parseFloat(c[1]))) {
+                    apX.push(parseFloat(c[0])); apY.push(parseFloat(c[1]));
+                }
+            });
+            if (apX.length > 0) {
+                traces.push({ 
+                    x: apX, y: apY, mode: 'markers+text', type: 'scatter', name: 'Puntos Aporte', 
+                    text: Array(apX.length).fill('📌'), textposition: 'top center', textfont: {size: 16},
+                    marker: { size: 10, color: 'magenta', symbol: 'cross', line: { color: 'white', width: 1 } }, 
+                    hoverinfo: 'none', showlegend: false 
+                });
+            }
+        }
+
+        return traces;
+    }
+
+    function getLayoutWithBoundary() {
+        const dims = getSpaceDimensions();
+        const xTicks = getAxisTicks(dims.x);
+        const yTicks = getAxisTicks(dims.y);
+
+        const layout = { 
+            margin: {t: 20, r: 20, l: 40, b: 40}, 
+            xaxis: { 
+                title: 'Coordenada X (m)', 
+                range: [-1, dims.x + 1], 
+                tickmode: 'array', 
+                tickvals: xTicks.vals, 
+                ticktext: xTicks.texts, 
+                gridcolor: '#eee'
+            }, 
+            yaxis: { 
+                title: 'Coordenada Y (m)', 
+                range: [-1, dims.y + 1], 
+                scaleanchor: 'x', 
+                scaleratio: 1, 
+                tickmode: 'array', 
+                tickvals: yTicks.vals, 
+                ticktext: yTicks.texts, 
+                gridcolor: '#eee'
+            }, 
+            shapes: [], annotations: []
+        };
+
+        document.querySelectorAll('.lamp-item').forEach((item, index) => {
+            let x = parseFloat(item.querySelector('.lamp-x').value) || 0;
+            let y = parseFloat(item.querySelector('.lamp-y').value) || 0;
+            let rx = parseFloat(item.querySelector('.lamp-rot-x').value) || 0;
+            let ry = parseFloat(item.querySelector('.lamp-rot-y').value) || 0;
+            
+            layout.shapes.push({
+                type: 'circle',
+                x0: x - 0.4, y0: y - 0.4, x1: x + 0.4, y1: y + 0.4,
+                fillcolor: 'var(--evolux-yellow)', line: { color: 'black', width: 2 }
+            });
+
+            if (rx !== 0 || ry !== 0) {
+                layout.annotations.push({ x: x, y: y + 1.2, text: `Tilt: ${rx}°, ${ry}°`, showarrow: false, font: {size: 11, color: '#1f77b4', weight: 'bold'} });
+            }
+        });
+
+        return layout;
+    }
+
+    function updateScene() {
+        if (typeof Plotly === 'undefined') return;
+        const layout = getLayoutWithBoundary();
+        const traces = getPlotTraces();
+        
+        Plotly.react('heatmap_div_preview', traces, layout, {
+            responsive: true, displaylogo: false, 
+            edits: {shapePosition: true} 
+        }).then(function(plotDiv){
+            
+            if (!plotDiv.__clickAttached) {
+                plotDiv.on('plotly_click', function(data){
+                    if(data.points.length > 0){
+                        let x = data.points[0].x.toFixed(2);
+                        let y = data.points[0].y.toFixed(2);
+                        document.getElementById('preview_coords').innerHTML = `📍 Coordenada: <strong>X=${x}, Y=${y}</strong>`;
+                    }
+                });
+                plotDiv.__clickAttached = true;
+            }
+
+            if (!plotDiv.__dragAttached) {
+                plotDiv.on('plotly_relayout', function(eventData){
+                    let updated = false;
+                    let lampItems = document.querySelectorAll('.lamp-item');
+
+                    for (let key in eventData) {
+                        let match = key.match(/shapes\[(\d+)\]\.(x0|x1|y0|y1)/);
+                        if (match) {
+                            let shapeIdx = parseInt(match[1]);
+                            if (shapeIdx >= 0 && shapeIdx < lampItems.length) {
+                                let shape = plotDiv.layout.shapes[shapeIdx];
+                                let newX = (shape.x0 + shape.x1) / 2;
+                                let newY = (shape.y0 + shape.y1) / 2;
+
+                                lampItems[shapeIdx].querySelector('.lamp-x').value = newX.toFixed(2);
+                                lampItems[shapeIdx].querySelector('.lamp-y').value = newY.toFixed(2);
+                                updated = true;
+                            }
+                        }
+                    }
+                    if (updated) {
+                        setTimeout(() => { updateScene(); }, 50);
+                    }
+                });
+                plotDiv.__dragAttached = true;
+            }
+        });
+    }
+
+    function loadAvailableLamps() {
+        fetch('/api/get_lamps').then(r => r.json()).then(data => {
+            if(data.status === 'ok') {
+                const sel = document.getElementById('lamp_model_selector');
+                sel.innerHTML = ''; 
+                if(data.lamps.length === 0) sel.innerHTML = '<option value="">No hay lámparas guardadas (suba una)</option>';
+                else { data.lamps.forEach(lamp => { const opt = document.createElement('option'); opt.value = lamp; opt.text = lamp; sel.add(opt); }); sel.value = data.lamps[0]; }
+            }
+        });
+    }
+
+    window.onload = function() { applyModeSettings(); loadAvailableLamps(); updateSecchi(); };
+
+    function uploadXML(input) {
+        const file = input.files[0]; if(!file) return;
+        const formData = new FormData(); formData.append('file', file);
+        fetch('/api/upload_lamp', { method: 'POST', body: formData }).then(r => r.json()).then(data => {
+            if(data.status === 'ok') {
+                const sel = document.getElementById('lamp_model_selector');
+                if (sel.options[0] && sel.options[0].value === "") sel.remove(0); 
+                let exists = Array.from(sel.options).some(opt => opt.value === data.filename);
+                if (!exists) { const opt = document.createElement('option'); opt.value = data.filename; opt.text = data.filename; sel.add(opt); }
+                sel.value = data.filename; showStatusMessage(`Lámpara guardada: ${data.filename}`);
+            } else { alert("Error: " + data.msg); }
+            input.value = '';
+        });
+    }
+
+    function addLamp() {
+        try {
+            const sel = document.getElementById('lamp_model_selector');
+            const model = sel ? sel.value : null;
+            if(!model || model === "") { alert("Primero seleccione un modelo de lámpara."); return; }
+
+            lampCount++;
+            const container = document.getElementById('lamp-list');
+            const dims = getSpaceDimensions();
+            const defaultX = dims.shape === 'circle' ? dims.radius : dims.x / 2;
+            const defaultY = dims.shape === 'circle' ? dims.radius : dims.y / 2;
+            let defaultZ = 2.0;
+            if (currentSpaceType === 'estanque') defaultZ = parseFloat(document.getElementById('z_water').value) + 0.5;
+
+            const zLabelText = currentSpaceType === 'estanque' ? 'Altura desde el fondo (m)' : 'Profundidad (m)';
+
+            const div = document.createElement('div');
+            div.className = 'lamp-item'; div.id = `lamp-${lampCount}`;
+            div.innerHTML = `
+                <div style="font-weight:900; color:#1a252f; margin-bottom:8px; text-transform: uppercase; font-size: 13px;">${lampCount}. ${model}</div>
+                <button type="button" class="btn-remove" onclick="removeLamp(${lampCount})">×</button>
+                <input type="hidden" class="lamp-xml" value="${model}">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 12px;">
+                    <div><strong>X:</strong> <input type="number" class="lamp-x" value="${defaultX}" style="width:100%; padding:5px;" oninput="updateScene()"></div>
+                    <div><strong>Y:</strong> <input type="number" class="lamp-y" value="${defaultY}" style="width:100%; padding:5px;" oninput="updateScene()"></div>
+                    <div style="grid-column: span 2;" class="z-label-container"><strong>${zLabelText}:</strong> <input type="number" class="lamp-z" value="${defaultZ}" style="width:100%; padding:5px;" oninput="updateScene()"></div>
+                    <div style="grid-column: span 2;"><strong>Potencia nominal (W)*:</strong> <input type="number" class="lamp-power" value="600" style="width:100%; padding:5px;"></div>
+                    <div><strong>Dim:</strong> <input type="number" class="lamp-dim" value="1.0" step="0.1" max="1" style="width:100%; padding:5px;"></div>
+                    <div><strong>Rot X°:</strong> <input type="number" class="lamp-rot-x" value="0" style="width:100%; padding:5px;" oninput="updateScene()"></div>
+                    <div><strong>Rot Y°:</strong> <input type="number" class="lamp-rot-y" value="0" style="width:100%; padding:5px;" oninput="updateScene()"></div>
+                    <div><strong>Rot Z°:</strong> <input type="number" class="lamp-rot-z" value="0" style="width:100%; padding:5px;" oninput="updateScene()"></div>
+                </div>
+            `;
+            container.appendChild(div);
+            updateUniqueLampsForSpectrum(); fetchLampProfile(model); 
+        } catch(e) { console.error(e); alert("Error al añadir lámpara."); }
+    }
+
+    function removeLamp(id) { const el = document.getElementById(`lamp-${id}`); if(el) { el.remove(); updateUniqueLampsForSpectrum(); updateScene(); } }
+
+    function stopSimulation() {
+        if(currentAbortController) {
+            currentAbortController.abort();
+            currentAbortController = null;
+        }
+    }
+
+    function getPayload(isCompareMode) {
+        let depthsArray = document.getElementById('target_depths').value.split(',').map(v => parseFloat(v.trim())).filter(v => !isNaN(v));
+        let compare_x = null, compare_y = null;
+
+        if (isCompareMode) {
+            const pt = document.getElementById('meas_point_selector').value;
+            if (!pt) { alert("Seleccione un punto válido (X, Y)."); return null; }
+            compare_x = parseFloat(pt.split(',')[0]); compare_y = parseFloat(pt.split(',')[1]);
+            const pointMeas = window.measurements.filter(m => Math.abs(m.x - compare_x) < 0.1 && Math.abs(m.y - compare_y) < 0.1);
+            const uniqueZ = [...new Set(pointMeas.map(m => m.z))];
+            if (uniqueZ.length === 0) { alert("No hay profundidades para este punto."); return null; }
+            depthsArray = uniqueZ;
+        } else if (depthsArray.length === 0) { alert("Ingrese alturas a graficar."); return null; }
+
+        let aporteStr = document.getElementById('aporte_puntos').value;
+        let aporte_puntos = [];
+        if (aporteStr.trim()) {
+            let parts = aporteStr.split(';');
+            parts.forEach(part => {
+                let coords = part.split(',');
+                if (coords.length === 3) {
+                    let x = parseFloat(coords[0]), y = parseFloat(coords[1]), z = parseFloat(coords[2]);
+                    if (!isNaN(x) && !isNaN(y) && !isNaN(z)) {
+                        aporte_puntos.push({x, y, z});
+                        if (!depthsArray.includes(z)) depthsArray.push(z); 
+                    }
+                }
+            });
+        }
+        depthsArray.sort((a,b) => currentSpaceType === 'estanque' ? b-a : a-b);
+
+        const lamps = [];
+        document.querySelectorAll('.lamp-item').forEach(item => {
+            lamps.push({
+                xml: item.querySelector('.lamp-xml').value,
+                x: parseFloat(item.querySelector('.lamp-x').value), y: parseFloat(item.querySelector('.lamp-y').value), z: parseFloat(item.querySelector('.lamp-z').value),
+                power: parseFloat(item.querySelector('.lamp-power').value), dim: parseFloat(item.querySelector('.lamp-dim').value),
+                rot_x: parseFloat(item.querySelector('.lamp-rot-x').value) || 0, rot_y: parseFloat(item.querySelector('.lamp-rot-y').value) || 0, rot_z: parseFloat(item.querySelector('.lamp-rot-z').value) || 0
+            });
+        });
+        if(lamps.length === 0) { alert("Agregue lámparas."); return null; }
+
+        const spectrum_lamps = [];
+        if (document.getElementById('plot_spectrum').checked) document.querySelectorAll('.spectrum-lamp-cb:checked').forEach(cb => spectrum_lamps.push(cb.value));
+        
+        let kdListRaw = document.getElementById('kd_list').value;
+        let kdList = kdListRaw.split(',').map(v => parseFloat(v.trim())).filter(v => !isNaN(v));
+        if (kdList.length === 0) kdList = [0.2];
+
+        let roi = { type: document.getElementById('roi_type').value };
+        if (roi.type === 'paralelepipedo') {
+            roi.l = parseFloat(document.getElementById('roi_p_l').value) || 0;
+            roi.w = parseFloat(document.getElementById('roi_p_w').value) || 0;
+            roi.h = parseFloat(document.getElementById('roi_p_h').value) || 0;
+            roi.cx = parseFloat(document.getElementById('roi_p_cx').value) || 0;
+            roi.cy = parseFloat(document.getElementById('roi_p_cy').value) || 0;
+            roi.cz = parseFloat(document.getElementById('roi_p_cz').value) || 0;
+        } else if (roi.type === 'cilindro') {
+            roi.r = parseFloat(document.getElementById('roi_c_r').value) || 0;
+            roi.h = parseFloat(document.getElementById('roi_c_h').value) || 0;
+            roi.cx = parseFloat(document.getElementById('roi_c_cx').value) || 0;
+            roi.cy = parseFloat(document.getElementById('roi_c_cy').value) || 0;
+            roi.cz = parseFloat(document.getElementById('roi_c_cz').value) || 0;
+        }
+
+        const dims = getSpaceDimensions();
+
+        return {
+            env: { 
+                type: currentSpaceType, 
+                shape: dims.shape,
+                radio: dims.shape === 'circle' ? dims.radius : null, 
+                x: dims.x, 
+                y: dims.y, 
+                z: parseFloat(document.getElementById('env_z').value) || 15.0,
+                z_interface: parseFloat(document.getElementById('z_water').value) || 3.2,
+                n1: parseFloat(document.getElementById('env_n1').value) || 1.0,
+                n2: parseFloat(document.getElementById('env_n2').value) || 1.33
+            },
+            poly: {
+                sides: parseInt(document.getElementById('poly_sides').value) || 0,
+                dist: parseFloat(document.getElementById('poly_dist').value) || 0
+            },
+            roi: roi,
+            target_depths: depthsArray, kd_list: kdList, rays: parseInt(document.getElementById('rays_count').value) || 50000,
+            draw_contour: document.getElementById('draw_contour').checked, contour_val: parseFloat(document.getElementById('contour_val').value) || 0.017,
+            color_scale_type: document.getElementById('color_scale_type').value,
+            plot_depth_profile: document.getElementById('plot_depth_profile').checked,
+            profile_step: parseFloat(document.getElementById('profile_step').value) || 0.5,
+            plot_spectrum: document.getElementById('plot_spectrum').checked, spectrum_lamps: spectrum_lamps,
+            spectrum_ranges: { 'blue': [parseFloat(document.getElementById('spec_b_min').value) || 400, parseFloat(document.getElementById('spec_b_max').value) || 499], 'green': [parseFloat(document.getElementById('spec_g_min').value) || 500, parseFloat(document.getElementById('spec_g_max').value) || 599], 'red': [parseFloat(document.getElementById('spec_r_min').value) || 600, parseFloat(document.getElementById('spec_r_max').value) || 750] },
+            compare_measurements: isCompareMode, compare_x: compare_x, compare_y: compare_y, measurements: isCompareMode ? window.measurements : [],
+            aporte_puntos: aporte_puntos,
+            aporte_puntos_raw: document.getElementById('aporte_puntos').value,
+            lamps: lamps,
+            summary_cols: { lamps: document.getElementById('col_lamps').checked, pos: document.getElementById('col_pos').checked, power: document.getElementById('col_power').checked, vol: document.getElementById('col_vol').checked }
+        };
+    }
+
+    function runSimulation(isCompareMode = false) {
+        const payload = getPayload(isCompareMode);
+        if (!payload) return;
+        const btn = document.getElementById('btn_run');
+        const btnStop = document.getElementById('btn_stop');
+        
+        btn.innerHTML = "⏳ CALCULANDO..."; btn.disabled = true;
+        btnStop.style.display = 'block';
+
+        currentAbortController = new AbortController();
+
+        fetch('/api/run_simulation', { 
+            method: 'POST', 
+            headers: {'Content-Type': 'application/json'}, 
+            body: JSON.stringify(payload),
+            signal: currentAbortController.signal
+        })
+        .then(r => r.json())
+        .then(data => {
+            btn.innerHTML = "▶ Simular"; btn.disabled = false; btnStop.style.display = 'none';
+            if(data.status === 'ok') { 
+                window.lastResults = data; 
+                try {
+                    renderResults(data, payload); 
+                    showStatusMessage("Simulación completada con éxito"); 
+                } catch (renderErr) {
+                    console.error(renderErr);
+                    alert("Error en el renderizado de los gráficos:\n" + renderErr.name + ": " + renderErr.message);
+                }
+            } 
+            else { alert("Error en el Servidor:\n" + data.msg); }
+        })
+        .catch(e => { 
+            if(e.name === 'AbortError') {
+                showStatusMessage("Simulación cancelada", "red");
+            } else {
+                console.error("Fetch Error:", e); 
+                alert("Error de Conexión/JS en el Navegador:\n" + e.message); 
+            }
+            btn.innerHTML = "▶ Simular"; 
+            btn.disabled = false; 
+            btnStop.style.display = 'none';
+        });
+    }
+
+    function renderResults(data, payload) {
+        const workspace = document.getElementById('results_dynamic_area');
+        const dlContainer = document.getElementById('downloads_container');
+        if (!workspace || !dlContainer) throw new Error("No se encontraron los contenedores HTML para dibujar.");
+        
+        workspace.innerHTML = ''; dlContainer.innerHTML = '';
+
+        if (data.kds && data.results_by_kd) {
+            data.kds = data.kds.map(kd => {
+                return Object.keys(data.results_by_kd).find(k => parseFloat(k) === parseFloat(kd)) || kd;
+            });
+        }
+        
+        if (data.depths && Array.isArray(data.depths)) {
+            data.depths.forEach(depth => {
+                const rowDiv = document.createElement('div');
+                rowDiv.className = 'depth-group result-graph';
+                let title = currentSpaceType === 'estanque' ? `ALTURA Z = ${depth}m` : `PROFUNDIDAD Z = ${depth}m`;
+                let html = `<h4 style="margin-top:0; border-bottom: 2px solid #eee; padding-bottom: 10px; color:#333;">${title}</h4><div class="kd-grid">`;
+                
+                if (data.kds && Array.isArray(data.kds)) {
+                    data.kds.forEach(kd => {
+                        if (data.results_by_kd && data.results_by_kd[kd] && data.results_by_kd[kd].depths) {
+                            const imgData = data.results_by_kd[kd].depths[depth];
+                            if(imgData && imgData.image) {
+                                html += `<div class="kd-card">
+                                            <div class="kd-card-title">ESCENARIO: KD = ${kd}</div>
+                                            <img src="data:image/png;base64,${imgData.image}">
+                                         </div>`;
+                            }
+                        }
+                    });
+                }
+                html += `</div>`;
+                rowDiv.innerHTML = html;
+                workspace.appendChild(rowDiv);
+            });
+        }
+
+        let htmlTablas = "";
+
+        let hasAportes = false;
+        if(data.kds) { data.kds.forEach(kd => { if(data.results_by_kd[kd] && data.results_by_kd[kd].aportes && data.results_by_kd[kd].aportes.length > 0) hasAportes = true; }); }
+
+        if (hasAportes && data.lamps_names) {
+            htmlTablas += `<h4 style="color:#333; margin-bottom:10px; text-transform: uppercase;">Aporte lumínico en puntos específicos</h4>
+                           <div style="overflow-x:auto; margin-bottom: 30px;">
+                           <table class="summary-table">
+                           <tr><th>PUNTO (X,Y,Z)</th><th>KD</th><th>TOTAL (W/m²)</th><th>LÁMPARA</th><th>APORTE (W/m² | %)</th></tr>`;
+            data.kds.forEach(kd => {
+                if(data.results_by_kd[kd] && data.results_by_kd[kd].aportes) {
+                    data.results_by_kd[kd].aportes.forEach(ap => {
+                        let numLamps = ap.lamps.length;
+                        ap.lamps.forEach((l, idx) => {
+                            htmlTablas += `<tr>`;
+                            if (idx === 0) {
+                                htmlTablas += `<td rowspan="${numLamps}"><strong>${ap.x}, ${ap.y}, ${ap.z}</strong></td>
+                                               <td rowspan="${numLamps}">${kd}</td>
+                                               <td rowspan="${numLamps}"><strong>${ap.total.toFixed(3)}</strong></td>`;
+                            }
+                            let lampName = data.lamps_names[l.lamp_idx] || `Lámpara ${l.lamp_idx + 1}`;
+                            htmlTablas += `<td>L${l.lamp_idx + 1}: ${lampName}</td>
+                                           <td>${l.val.toFixed(3)} <strong style="color:#1f77b4;">(${l.pct.toFixed(1)}%)</strong></td>
+                                           </tr>`;
+                        });
+                    });
+                }
+            });
+            htmlTablas += `</table></div>`;
+        }
+
+        let numLamps = payload.lamps.length;
+        let summaryCols = payload.summary_cols;
+        
+        htmlTablas += `<h4 style="color:#333; margin-bottom:10px; text-transform: uppercase;">Resumen comparativo de escenarios</h4>
+                       <div style="overflow-x:auto;">
+                       <table class="summary-table">
+                       <tr><th>KD</th><th>DISCO SECCHI EQ.</th><th>PROMEDIO (W/m²)</th><th>MÁX (W/m²)</th><th>MÍN (W/m²)</th><th>VOLUMEN ILUM (%)</th>`;
+        if (summaryCols.lamps) htmlTablas += `<th>LÁMPARA</th>`;
+        if (summaryCols.pos) htmlTablas += `<th>POSICIÓN (X,Y,Z)</th>`;
+        if (summaryCols.power) htmlTablas += `<th>POTENCIA (W)</th>`;
+        htmlTablas += `</tr>`;
+
+        if (data.table_data && Array.isArray(data.table_data)) {
+            data.table_data.forEach(row => {
+                let r_avg = row.avg !== undefined ? row.avg.toFixed(3) : "0.000";
+                let r_max = row.max !== undefined ? row.max.toFixed(3) : "0.000";
+                let r_min = row.min !== undefined ? row.min.toFixed(3) : "0.000";
+                let r_vol = row.vol_pct !== undefined ? row.vol_pct.toFixed(2) : "0.00";
+                let r_secchi = row.secchi !== undefined && row.secchi > 0 ? row.secchi.toFixed(2) + 'm' : "-";
+
+                payload.lamps.forEach((lamp, idx) => {
+                    htmlTablas += `<tr>`;
+                    if (idx === 0) {
+                        htmlTablas += `<td rowspan="${numLamps}"><strong>${row.kd || '-'}</strong></td>
+                                        <td rowspan="${numLamps}"><strong style="color:#1f77b4;">${r_secchi}</strong></td>
+                                        <td rowspan="${numLamps}">${r_avg}</td>
+                                        <td rowspan="${numLamps}">${r_max}</td>
+                                        <td rowspan="${numLamps}">${r_min}</td>
+                                        <td rowspan="${numLamps}"><strong>${r_vol}%</strong></td>`;
+                    }
+                    if (summaryCols.lamps) {
+                        let lName = lamp.xml.replace('.xml', '').replace('.ies', '');
+                        htmlTablas += `<td>L${idx + 1}: ${lName}</td>`;
+                    }
+                    if (summaryCols.pos) {
+                        htmlTablas += `<td>(${lamp.x}, ${lamp.y}, ${lamp.z})</td>`;
+                    }
+                    if (summaryCols.power) {
+                        let effectivePower = (lamp.power * lamp.dim).toFixed(1);
+                        htmlTablas += `<td>${effectivePower}</td>`;
+                    }
+                    htmlTablas += `</tr>`;
+                });
+            });
+        }
+        htmlTablas += `</table></div>`;
+
+        const tablesWrapper = document.createElement('div');
+        tablesWrapper.className = 'graph-wrapper result-graph';
+        tablesWrapper.style.width = "100%";
+        tablesWrapper.innerHTML = htmlTablas;
+        workspace.appendChild(tablesWrapper);
+
+        if (data.kds && data.kds.length > 0) {
+            data.kds.forEach(kd => {
+                if (data.results_by_kd && data.results_by_kd[kd] && data.results_by_kd[kd].depth_profile_image) {
+                    const dpDiv = document.createElement('div');
+                    dpDiv.className = 'graph-wrapper result-graph';
+                    dpDiv.style.width = "100%";
+                    dpDiv.innerHTML = `<h4 style="color:#333; margin-bottom:10px; text-transform: uppercase;">PERFIL DE PROFUNDIDAD: ÁREA Y VOLUMEN (KD = ${kd})</h4>
+                                       <div style="text-align:center;"><img src="data:image/png;base64,${data.results_by_kd[kd].depth_profile_image}" style="max-width:100%;"></div>`;
+                    workspace.appendChild(dpDiv);
+                }
+            });
+        }
+
+        if (data.kds && data.kds.length > 0) {
+            let firstKd = data.kds[0];
+            if (data.results_by_kd && data.results_by_kd[firstKd]) {
+                let compImg = data.results_by_kd[firstKd].comparison_image;
+                if (compImg) {
+                    const compDiv = document.createElement('div');
+                    compDiv.className = 'graph-wrapper result-graph';
+                    compDiv.style.width = "100%";
+                    compDiv.innerHTML = `<h4 style="color:#333; margin-bottom:10px;">ATENUACIÓN: MEDICIÓN VS SIMULACIÓN</h4>
+                                         <div style="text-align:center;"><img src="data:image/png;base64,${compImg}" style="max-width:100%;"></div>`;
+                    workspace.appendChild(compDiv);
+                }
+            }
+        }
+        
+        if (data.spectrums && typeof data.spectrums === 'object') {
+            Object.keys(data.spectrums).forEach(lamp => {
+                const specDiv = document.createElement('div');
+                specDiv.className = 'graph-wrapper result-graph';
+                specDiv.style.width = "100%";
+                specDiv.innerHTML = `<h4 style="color:#333; margin-bottom:10px;">ESPECTRO: ${lamp}</h4>
+                                     <div style="text-align:center;"><img src="data:image/png;base64,${data.spectrums[lamp]}" style="max-width:100%;"></div>`;
+                workspace.appendChild(specDiv);
+            });
+        }
+
+        let dlHtml = `<div style="font-weight:bold; font-size:12px; margin-bottom:5px;">GRÁFICOS CONSOLIDADOS</div>`;
+        if (data.kds && Array.isArray(data.kds)) {
+            data.kds.forEach(kd => {
+                dlHtml += `<button class="btn-download" onclick="downloadCombined('${kd}')">📄 CONSOLIDADO KD=${kd}</button>`;
+            });
+        }
+        
+        dlHtml += `<div style="font-weight:bold; font-size:12px; margin-top:15px; margin-bottom:5px;">GRÁFICOS INDIVIDUALES</div>`;
+        dlHtml += `<select id="dl_kd_selector" style="width:100%; font-size:13px; margin-bottom:5px; padding:6px;">`;
+        if (data.kds && Array.isArray(data.kds)) {
+            data.kds.forEach(kd => { dlHtml += `<option value="${kd}">ESCENARIO KD = ${kd}</option>`; });
+        }
+        dlHtml += `</select><button class="btn-download" style="background:#1f77b4;" onclick="downloadIndividual()">⬇ DESCARGAR INDIVIDUALES</button>`;
+        dlHtml += `<div style="font-size:10px; color:#888; text-align:center; margin-top:10px;">*La ruta dependerá de la configuración "Guardar como" de su navegador.</div>`;
+        
+        dlContainer.innerHTML = dlHtml;
+    }
+
+    function downloadCombined(kd) {
+        if(!window.lastResults || !window.lastResults.results_by_kd || !window.lastResults.results_by_kd[kd]) return;
+        const img = window.lastResults.results_by_kd[kd].combined_image;
+        if(img) {
+            const a = document.createElement('a');
+            a.href = "data:image/png;base64," + img;
+            a.download = `Irradiancia_Consolidada_Kd${kd}.png`;
+            a.click();
+        }
+    }
+
+    function downloadIndividual() {
+        if(!window.lastResults || !window.lastResults.results_by_kd) return;
+        const kd = document.getElementById('dl_kd_selector').value;
+        const depths = window.lastResults.results_by_kd[kd].depths;
+        if (!depths) return;
+        
+        Object.keys(depths).forEach((d, i) => {
+            setTimeout(() => {
+                const img = depths[d].image;
+                if(img) {
+                    const a = document.createElement('a');
+                    a.href = "data:image/png;base64," + img;
+                    a.download = `Irradiancia_Kd${kd}_Z${d}m.png`;
+                    a.click();
+                }
+            }, i * 300); 
+        });
+    }
+
+    async function saveConfiguration() {
+        const payload = getPayload(false);
+        if(!payload) return;
+        const jsonString = JSON.stringify(payload, null, 4);
+
+        try {
+            if (window.showSaveFilePicker) {
+                const handle = await window.showSaveFilePicker({
+                    suggestedName: `evolux_config_${new Date().toISOString().slice(0,10)}.json`,
+                    types: [{ description: 'JSON Config File', accept: {'application/json': ['.json']} }]
+                });
+                const writable = await handle.createWritable();
+                await writable.write(jsonString);
+                await writable.close();
+                showStatusMessage("Configuración guardada");
+            } else {
+                let filename = prompt("Ingrese el nombre para el archivo:", `evolux_config_${new Date().toISOString().slice(0,10)}.json`);
+                if (!filename) return; 
+                if (!filename.endsWith('.json')) filename += '.json';
+                const blob = new Blob([jsonString], { type: "application/json" });
+                const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+                a.download = filename; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                showStatusMessage("Configuración guardada");
+            }
+        } catch (err) {
+            console.error(err);
+        }
+    }
+
+    function loadConfiguration(event) {
+        const file = event.target.files[0]; if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const config = JSON.parse(e.target.result);
+                
+                if(config.env) {
+                    document.getElementById('mode-selector').value = config.env.type || 'estanque';
+                    currentSpaceType = config.env.type || 'estanque';
+                    document.getElementById('env_shape').value = config.env.shape || (config.env.type === 'estanque' ? 'circle' : 'rect');
+                    document.getElementById('env_radio').value = config.env.radio || 20;
+                    document.getElementById('env_x').value = config.env.x || 40;
+                    document.getElementById('env_y').value = config.env.y || 40;
+                    document.getElementById('z_water').value = config.env.z_interface || 3.2;
+                    document.getElementById('env_n1').value = config.env.n1 || 1.0;
+                    document.getElementById('env_n2').value = config.env.n2 || 1.33;
+                    document.getElementById('env_z').value = config.env.z || 15.0;
+                    
+                    if(currentSpaceType === 'estanque') {
+                        document.getElementById('env_z_container').style.display = 'none';
+                        document.getElementById('z_water_container').style.display = 'block';
+                        document.getElementById('env_n1_container').style.display = 'block';
+                        document.getElementById('env_n2_label').innerHTML = '<strong>Índice ref. medio 2</strong> <span class="normal-case">(Agua)</span>';
+                    } else {
+                        document.getElementById('env_z_container').style.display = 'block';
+                        document.getElementById('z_water_container').style.display = 'none';
+                        document.getElementById('env_n1_container').style.display = 'none';
+                        document.getElementById('env_n2_label').innerHTML = '<strong>Índice ref. medio</strong> <span class="normal-case">(Agua)</span>';
+                    }
+                    toggleShapePanel();
+                }
+                
+                if(config.poly) {
+                    document.getElementById('poly_sides').value = config.poly.sides || 0;
+                    document.getElementById('poly_dist').value = config.poly.dist || 0;
+                }
+                
+                if(config.roi) {
+                    document.getElementById('roi_type').value = config.roi.type || 'global';
+                    toggleRoiPanel();
+                    if(config.roi.type === 'paralelepipedo') {
+                        document.getElementById('roi_p_l').value = config.roi.l || 10;
+                        document.getElementById('roi_p_w').value = config.roi.w || 10;
+                        document.getElementById('roi_p_h').value = config.roi.h || 5;
+                        document.getElementById('roi_p_cx').value = config.roi.cx || 10;
+                        document.getElementById('roi_p_cy').value = config.roi.cy || 10;
+                        document.getElementById('roi_p_cz').value = config.roi.cz || 2.5;
+                    } else if(config.roi.type === 'cilindro') {
+                        document.getElementById('roi_c_r').value = config.roi.r || 5;
+                        document.getElementById('roi_c_h').value = config.roi.h || 5;
+                        document.getElementById('roi_c_cx').value = config.roi.cx || 10;
+                        document.getElementById('roi_c_cy').value = config.roi.cy || 10;
+                        document.getElementById('roi_c_cz').value = config.roi.cz || 2.5;
+                    }
+                }
+
+                if(config.target_depths) document.getElementById('target_depths').value = config.target_depths.join(', ');
+                if(config.rays) document.getElementById('rays_count').value = config.rays;
+                if(config.kd_list) document.getElementById('kd_list').value = config.kd_list.join(', ');
+                if(config.aporte_puntos_raw !== undefined) document.getElementById('aporte_puntos').value = config.aporte_puntos_raw;
+
+                if(config.draw_contour !== undefined) document.getElementById('draw_contour').checked = config.draw_contour;
+                if(config.contour_val !== undefined) document.getElementById('contour_val').value = config.contour_val;
+                if(config.color_scale_type !== undefined) document.getElementById('color_scale_type').value = config.color_scale_type;
+
+                if(config.plot_depth_profile !== undefined) document.getElementById('plot_depth_profile').checked = config.plot_depth_profile;
+                if(config.profile_step !== undefined) document.getElementById('profile_step').value = config.profile_step;
+                
+                if(config.plot_spectrum !== undefined) {
+                    document.getElementById('plot_spectrum').checked = config.plot_spectrum;
+                    toggleSpectrumPanel();
+                }
+                if(config.spectrum_ranges) {
+                    document.getElementById('spec_b_min').value = config.spectrum_ranges.blue[0];
+                    document.getElementById('spec_b_max').value = config.spectrum_ranges.blue[1];
+                    document.getElementById('spec_g_min').value = config.spectrum_ranges.green[0];
+                    document.getElementById('spec_g_max').value = config.spectrum_ranges.green[1];
+                    document.getElementById('spec_r_min').value = config.spectrum_ranges.red[0];
+                    document.getElementById('spec_r_max').value = config.spectrum_ranges.red[1];
+                }
+
+                if(config.summary_cols) {
+                    document.getElementById('col_lamps').checked = config.summary_cols.lamps;
+                    document.getElementById('col_pos').checked = config.summary_cols.pos;
+                    document.getElementById('col_power').checked = config.summary_cols.power;
+                    document.getElementById('col_vol').checked = config.summary_cols.vol;
+                }
+                
+                const container = document.getElementById('lamp-list'); container.innerHTML = ''; lampCount = 0;
+                if(config.lamps) {
+                    config.lamps.forEach(lamp => {
+                        lampCount++;
+                        const zLabelText = currentSpaceType === 'estanque' ? 'Altura desde el fondo (m)' : 'Profundidad (m)';
+                        const div = document.createElement('div'); div.className = 'lamp-item'; div.id = `lamp-${lampCount}`;
+                        div.innerHTML = `
+                            <div style="font-weight:900; color:#1a252f; margin-bottom:8px; text-transform: uppercase; font-size: 13px;">${lampCount}. ${lamp.xml}</div>
+                            <button type="button" class="btn-remove" onclick="removeLamp(${lampCount})">×</button>
+                            <input type="hidden" class="lamp-xml" value="${lamp.xml}">
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 12px;">
+                                <div><strong>X:</strong> <input type="number" class="lamp-x" value="${lamp.x}" style="width:100%; padding:5px;" oninput="updateScene()"></div>
+                                <div><strong>Y:</strong> <input type="number" class="lamp-y" value="${lamp.y}" style="width:100%; padding:5px;" oninput="updateScene()"></div>
+                                <div style="grid-column: span 2;" class="z-label-container"><strong>${zLabelText}:</strong> <input type="number" class="lamp-z" value="${lamp.z}" style="width:100%; padding:5px;" oninput="updateScene()"></div>
+                                <div style="grid-column: span 2;"><strong>Potencia nominal (W)*:</strong> <input type="number" class="lamp-power" value="${lamp.power || 600}" style="width:100%; padding:5px;"></div>
+                                <div><strong>Dim:</strong> <input type="number" class="lamp-dim" value="${lamp.dim}" step="0.1" max="1" style="width:100%; padding:5px;"></div>
+                                <div><strong>Rot X°:</strong> <input type="number" class="lamp-rot-x" value="${lamp.rot_x || 0}" style="width:100%; padding:5px;" oninput="updateScene()"></div>
+                                <div><strong>Rot Y°:</strong> <input type="number" class="lamp-rot-y" value="${lamp.rot_y || 0}" style="width:100%; padding:5px;" oninput="updateScene()"></div>
+                                <div><strong>Rot Z°:</strong> <input type="number" class="lamp-rot-z" value="${lamp.rot_z || 0}" style="width:100%; padding:5px;" oninput="updateScene()"></div>
+                            </div>
+                        `;
+                        container.appendChild(div);
+                        fetchLampProfile(lamp.xml); 
+                    });
+                }
+                updateUniqueLampsForSpectrum(); updateSecchi(); updateScene();
+                event.target.value = ''; showStatusMessage("Configuración cargada");
+            } catch (err) { alert("Error al leer el archivo JSON."); }
+        };
+        reader.readAsText(file);
+    }
+</script>
+</body>
+</html>

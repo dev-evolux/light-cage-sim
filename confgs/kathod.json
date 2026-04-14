@@ -1,0 +1,93 @@
+{
+    "env": {
+        "type": "estanque",
+        "radio": 3,
+        "x": 6,
+        "y": 6,
+        "z": 15,
+        "z_interface": 1,
+        "n1": 1,
+        "n2": 1.33
+    },
+    "poly": {
+        "sides": 0,
+        "dist": 0
+    },
+    "roi": {
+        "type": "global"
+    },
+    "target_depths": [
+        3
+    ],
+    "kd_list": [
+        0.2
+    ],
+    "rays": 500000,
+    "draw_contour": false,
+    "contour_val": 0.017,
+    "plot_depth_profile": false,
+    "profile_step": 0.5,
+    "plot_spectrum": false,
+    "spectrum_lamps": [],
+    "spectrum_ranges": {
+        "blue": [
+            400,
+            499
+        ],
+        "green": [
+            500,
+            599
+        ],
+        "red": [
+            600,
+            750
+        ]
+    },
+    "compare_measurements": false,
+    "compare_x": null,
+    "compare_y": null,
+    "measurements": [],
+    "aporte_puntos": [],
+    "aporte_puntos_raw": "",
+    "lamps": [
+        {
+            "xml": "pll120001-xml-color-cree-160000001975.ies",
+            "x": 1,
+            "y": 3,
+            "z": 4,
+            "power": 40,
+            "dim": 1,
+            "rot_x": 0,
+            "rot_y": 0,
+            "rot_z": 90
+        },
+        {
+            "xml": "NEXUS JK SLM FISH.xml",
+            "x": 5,
+            "y": 3,
+            "z": 4,
+            "power": 40,
+            "dim": 1,
+            "rot_x": 0,
+            "rot_y": 0,
+            "rot_z": 90
+        },
+        {
+            "xml": "pll120001-xpg3-cree-1600000019.ies",
+            "x": 3,
+            "y": 3,
+            "z": 4,
+            "power": 40,
+            "dim": 1,
+            "rot_x": 0,
+            "rot_y": 0,
+            "rot_z": 90
+        }
+    ],
+    "summary_cols": {
+        "lamps": true,
+        "pos": true,
+        "power": true,
+        "vol": true
+    }
+}

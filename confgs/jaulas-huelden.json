@@ -1,0 +1,152 @@
+{
+    "env": {
+        "type": "jaula",
+        "radio": null,
+        "x": 50,
+        "y": 50,
+        "z": 40,
+        "z_interface": 0,
+        "n1": 1,
+        "n2": 1.33
+    },
+    "roi": {
+        "type": "paralelepipedo",
+        "l": 40,
+        "w": 40,
+        "h": 15,
+        "cx": 25,
+        "cy": 25,
+        "cz": 10.5
+    },
+    "target_depths": [
+        5,
+        8,
+        10,
+        15
+    ],
+    "kd_list": [
+        0.5
+    ],
+    "rays": 50000,
+    "draw_contour": true,
+    "contour_val": 0.017,
+    "plot_depth_profile": true,
+    "profile_step": 0.5,
+    "plot_spectrum": false,
+    "spectrum_lamps": [],
+    "spectrum_ranges": {
+        "blue": [
+            400,
+            499
+        ],
+        "green": [
+            500,
+            599
+        ],
+        "red": [
+            600,
+            750
+        ]
+    },
+    "compare_measurements": false,
+    "compare_x": null,
+    "compare_y": null,
+    "measurements": [],
+    "aporte_puntos": [],
+    "lamps": [
+        {
+            "xml": "TEMPEST 600W.xml",
+            "x": 12.5,
+            "y": 12.5,
+            "z": 3,
+            "power": 600,
+            "dim": 1,
+            "rot_x": 0,
+            "rot_y": 0,
+            "rot_z": 0
+        },
+        {
+            "xml": "TEMPEST 600W.xml",
+            "x": 37.5,
+            "y": 12.5,
+            "z": 3,
+            "power": 600,
+            "dim": 1,
+            "rot_x": 0,
+            "rot_y": 0,
+            "rot_z": 0
+        },
+        {
+            "xml": "TEMPEST 600W.xml",
+            "x": 12.5,
+            "y": 25,
+            "z": 3,
+            "power": 600,
+            "dim": 1,
+            "rot_x": 0,
+            "rot_y": 0,
+            "rot_z": 0
+        },
+        {
+            "xml": "TEMPEST 600W.xml",
+            "x": 37.5,
+            "y": 25,
+            "z": 2,
+            "power": 600,
+            "dim": 1,
+            "rot_x": 0,
+            "rot_y": 0,
+            "rot_z": 0
+        },
+        {
+            "xml": "TEMPEST 600W.xml",
+            "x": 12.5,
+            "y": 37.5,
+            "z": 3,
+            "power": 600,
+            "dim": 1,
+            "rot_x": 0,
+            "rot_y": 0,
+            "rot_z": 0
+        },
+        {
+            "xml": "TEMPEST 600W.xml",
+            "x": 37.5,
+            "y": 37.5,
+            "z": 3,
+            "power": 600,
+            "dim": 1,
+            "rot_x": 0,
+            "rot_y": 0,
+            "rot_z": 0
+        },
+        {
+            "xml": "TEMPEST 600W.xml",
+            "x": 25,
+            "y": 16.5,
+            "z": 3,
+            "power": 600,
+            "dim": 1,
+            "rot_x": 0,
+            "rot_y": 0,
+            "rot_z": 0
+        },
+        {
+            "xml": "TEMPEST 600W.xml",
+            "x": 25,
+            "y": 33.5,
+            "z": 3,
+            "power": 600,
+            "dim": 1,
+            "rot_x": 0,
+            "rot_y": 0,
+            "rot_z": 0
+        }
+    ],
+    "summary_cols": {
+        "lamps": true,
+        "pos": true,
+        "power": true,
+        "vol": true
+    }
+}

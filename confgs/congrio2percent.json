@@ -1,0 +1,75 @@
+{
+    "env": {
+        "type": "estanque",
+        "shape": "rect",
+        "radio": null,
+        "x": 3,
+        "y": 1.5,
+        "z": 15,
+        "z_interface": 0.8,
+        "n1": 1,
+        "n2": 1.33
+    },
+    "poly": {
+        "sides": 0,
+        "dist": 0
+    },
+    "roi": {
+        "type": "global"
+    },
+    "target_depths": [
+        0.75,
+        0.5,
+        0
+    ],
+    "kd_list": [
+        0.34
+    ],
+    "rays": 6000000,
+    "draw_contour": true,
+    "contour_val": 0.02,
+    "color_scale_type": "log",
+    "plot_depth_profile": true,
+    "profile_step": 0.5,
+    "plot_spectrum": false,
+    "spectrum_lamps": [],
+    "spectrum_ranges": {
+        "blue": [
+            400,
+            499
+        ],
+        "green": [
+            500,
+            599
+        ],
+        "red": [
+            600,
+            750
+        ]
+    },
+    "compare_measurements": false,
+    "compare_x": null,
+    "compare_y": null,
+    "measurements": [],
+    "aporte_puntos": [],
+    "aporte_puntos_raw": "",
+    "lamps": [
+        {
+            "xml": "NEXUS JK SLM FISH.xml",
+            "x": 1.5,
+            "y": 0.75,
+            "z": 2.8,
+            "power": 40,
+            "dim": 0.02,
+            "rot_x": 0,
+            "rot_y": 0,
+            "rot_z": 0
+        }
+    ],
+    "summary_cols": {
+        "lamps": true,
+        "pos": true,
+        "power": true,
+        "vol": true
+    }
+}
