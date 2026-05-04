@@ -2,7 +2,7 @@ from flask import Flask, render_template, jsonify, request
 import os
 import json
 import numpy as np
-from scipy.interpolate import RegularGridInterpolator
+from scipy.interpolate import RegularGridInterpolator, make_interp_spline
 from matplotlib.collections import LineCollection
 import matplotlib.colors as mcolors
 import matplotlib.ticker as ticker 
@@ -180,7 +180,7 @@ def _plot_map_on_ax(ax, E, X, Y, config, env_type, center_x, center_y, env_radio
             circ = plt.Circle((float(roi['cx']), float(roi['cy'])), float(roi['r']), edgecolor='magenta', facecolor='none', linestyle='-.', linewidth=2.5)
             ax.add_patch(circ)
 
-    for lamp in config['lamps']:
+    for lamp in config.get('lamps', []):
         ax.plot(float(lamp['x']), float(lamp['y']), marker='*', color='yellow', markeredgecolor='black', markersize=10)
 
     ax.set_aspect('equal')
@@ -195,29 +195,59 @@ def _plot_map_on_ax(ax, E, X, Y, config, env_type, center_x, center_y, env_radio
 def run_simulation():
     try:
         config = request.json
-        env_x, env_y = float(config['env']['x']), float(config['env']['y'])
-        env_z = float(config['env'].get('z', 15.0))
-        env_type = config['env'].get('type', 'estanque')
-        env_shape = config['env'].get('shape', 'circle' if env_type == 'estanque' else 'rect')
-        raw_radio = config['env'].get('radio')
+        env_dict = config.get('env', {})
+        
+        raw_x = env_dict.get('x')
+        raw_y = env_dict.get('y')
+        raw_z = env_dict.get('z')
+        raw_radio = env_dict.get('radio')
+        raw_z_int = env_dict.get('z_interface')
+        
+        env_x = float(raw_x) if raw_x is not None else 40.0
+        env_y = float(raw_y) if raw_y is not None else 40.0
+        env_z = float(raw_z) if raw_z is not None else 15.0
         env_radio = float(raw_radio) if raw_radio is not None else env_x / 2.0
+        z_interface = float(raw_z_int) if raw_z_int is not None else 3.2
+        
+        center_x, center_y = env_x / 2.0, env_y / 2.0
+        
+        env_type = env_dict.get('type', 'estanque')
+        env_shape = env_dict.get('shape', 'circle' if env_type == 'estanque' else 'rect')
+        
         roi = config.get('roi', {'type': 'global'})
 
-        contour_val = config.get('contour_val', 0.017)
-        target_depths_requested = sorted([float(d) for d in config.get('target_depths', [])], reverse=True)
-        kds_requested = config.get('kd_list', [0.2])
+        raw_contour = config.get('contour_val')
+        contour_val = float(raw_contour) if raw_contour is not None else 0.017
+        
+        target_depths_requested = sorted([float(d) for d in config.get('target_depths', []) if d is not None], reverse=True)
+        
+        optics_mode = config.get('optics_mode', 'kd_fijo')
+        
+        if optics_mode == 'kd_fijo':
+            kds_requested = config.get('kd_list', [0.2])
+        elif optics_mode == 'scattering':
+            mc_input_type = config.get('optics', {}).get('mc_input_type', 'scalar')
+            if mc_input_type == 'scalar':
+                c_att = config.get('optics', {}).get('c')
+                kds_requested = [float(c_att) if c_att is not None else 0.5] 
+            else: # bio o json
+                kds_requested = [0.0] 
+        else:
+            kds_requested = [0.0] 
+
         aporte_puntos = config.get('aporte_puntos', [])
         
-        # Limitar la profundidad de evaluación según el modo de simulación
         if roi['type'] in ['paralelepipedo', 'cilindro']:
-            calc_min_z = max(0, float(roi.get('cz', 0)) - float(roi.get('h', 0)) / 2.0)
-            calc_max_z = float(roi.get('cz', 0)) + float(roi.get('h', 0)) / 2.0
+            roi_cz = float(roi.get('cz')) if roi.get('cz') is not None else 0.0
+            roi_h = float(roi.get('h')) if roi.get('h') is not None else 0.0
+            calc_min_z = max(0, roi_cz - roi_h / 2.0)
+            calc_max_z = roi_cz + roi_h / 2.0
         else:
             calc_min_z = 0.0
-            # Si es estanque, la profundidad global está dada por la altura del agua
-            calc_max_z = float(config['env'].get('z_interface', 3.2)) if env_type == 'estanque' else env_z
+            calc_max_z = z_interface if env_type == 'estanque' else env_z
             
-        profile_step = float(config.get('profile_step', 0.5))
+        raw_step = config.get('profile_step')
+        profile_step = float(raw_step) if raw_step is not None else 0.5
         prof_d = np.arange(calc_min_z, calc_max_z + profile_step, profile_step)
         
         all_depths_set = set(target_depths_requested)
@@ -227,12 +257,36 @@ def run_simulation():
         all_depths_requested = sorted(list(all_depths_set), reverse=True)
         config['target_depths'] = all_depths_requested
         
+        # --- PRE-PROCESAMIENTO DE POTENCIA (DIMMING AUTOMÁTICO) ---
+        for lamp in config.get('lamps', []):
+            req_power = float(lamp.get('power', 0.0))
+            if req_power <= 0.0:
+                lamp['dim'] = 0.0 # Apaga la lámpara por completo
+            else:
+                xml_id = lamp.get('xml')
+                parser = engine.parsers.get(xml_id)
+                if parser and not getattr(parser, 'is_ies', False):
+                    spectrum = parser.get_spectrum()
+                    if spectrum:
+                        wls = np.array(sorted(spectrum.keys()))
+                        pwrs = np.array([spectrum[w] for w in wls])
+                        base_power = trapz_func(pwrs, wls)
+                        if base_power > 0:
+                            lamp['dim'] = req_power / base_power
+                        else:
+                            lamp['dim'] = 1.0
+                    else:
+                        lamp['dim'] = 1.0
+                else:
+                    lamp['dim'] = 1.0 
+
         results_by_kd = {}
         table_data = []
         spectrum_results = {}
-        lamps_names = [lamp['xml'] for lamp in config['lamps']]
+        lamps_names = [lamp['xml'] for lamp in config.get('lamps', [])]
         
-        if config.get('plot_spectrum'):
+        # --- ESPECTRO INICIAL FUERA DEL BUCLE ---
+        if config.get('plot_spectrum_initial'):
             ranges = config.get('spectrum_ranges', {'blue': [400, 499], 'green': [500, 599], 'red': [600, 750]})
             for xml_name in config.get('spectrum_lamps', []):
                 parser = engine.parsers.get(xml_name)
@@ -259,9 +313,9 @@ def run_simulation():
                                 pct = (trapz_func(pwrs[mask], wls[mask]) / total_auc) * 100
                                 ax_spec.fill_between(wls, pwrs, where=mask, color=colors.get(color_name, 'gray'), alpha=0.3, label=rf"{labels_es.get(color_name, color_name)} ({w_min}-{w_max}nm): {pct:.1f}%")
                         
-                        ax_spec.set_title(rf"Espectro - {xml_name}")
+                        ax_spec.set_title(rf"Espectro absoluto inicial (0m) - {xml_name}")
                         ax_spec.set_xlabel(r"Longitud de onda $[nm]$")
-                        ax_spec.set_ylabel(r"Potencia Relativa")
+                        ax_spec.set_ylabel(r"Potencia radiométrica relativa")
                         ax_spec.legend(loc='upper right', fontsize=9)
                         ax_spec.grid(True, linestyle=':', alpha=0.6)
                         ax_spec.set_xlim(380, 780)
@@ -270,7 +324,7 @@ def run_simulation():
                         buf_spec = io.BytesIO()
                         plt.savefig(buf_spec, format='png', bbox_inches='tight', transparent=True)
                         plt.close(fig_spec)
-                        spectrum_results[xml_name] = base64.b64encode(buf_spec.getvalue()).decode('utf-8')
+                        spectrum_results[f"Espectro Inicial ({xml_name})"] = base64.b64encode(buf_spec.getvalue()).decode('utf-8')
 
         bins = 100
         grid_x = np.linspace(0, env_x, bins)
@@ -278,12 +332,127 @@ def run_simulation():
         X, Y = np.meshgrid((grid_x[:-1]+grid_x[1:])/2, (grid_y[:-1]+grid_y[1:])/2)
         x_centers, y_centers = (grid_x[:-1] + grid_x[1:]) / 2, (grid_y[:-1] + grid_y[1:]) / 2
         area_bin = (grid_x[1]-grid_x[0]) * (grid_y[1]-grid_y[0])
-        center_x, center_y = env_x / 2.0, env_y / 2.0
         
         for kd_val in kds_requested:
             kd_val = float(kd_val)
-            config['kd'] = {'fijo': kd_val}
             
+            if 'optics' not in config: config['optics'] = {}
+            config['optics']['mode'] = optics_mode 
+            
+            if optics_mode == 'kd_fijo': 
+                config['optics']['kd_fijo'] = kd_val
+            elif optics_mode == 'scattering' and config['optics'].get('mc_input_type') == 'scalar': 
+                config['optics']['c'] = kd_val
+            
+            # --- GENERACIÓN DE GRÁFICOS DE ATENUACIÓN ESPECTRAL POR ESCENARIO ---
+            if config.get('plot_spectrum_attenuation') or config.get('plot_spectrum_normalized'):
+                for xml_name in config.get('spectrum_lamps', []):
+                    parser = engine.parsers.get(xml_name)
+                    if parser:
+                        lamp_spec = parser.get_spectrum()
+                        if lamp_spec:
+                            wls = np.array(sorted(lamp_spec.keys()))
+                            pwrs = np.array([lamp_spec[w] for w in wls])
+
+                            # Calcular la atenuación espectral efectiva según el modo seleccionado
+                            kd_interp_plot = np.zeros_like(wls)
+                            
+                            if optics_mode == 'kd_fijo':
+                                kd_interp_plot = np.full_like(wls, kd_val)
+                            elif optics_mode == 'kd_espectral':
+                                kd_spectral_dict = config.get('optics', {}).get('kd_spectral', {})
+                                if kd_spectral_dict:
+                                    kd_wls = np.array([float(k) for k in sorted(kd_spectral_dict.keys())])
+                                    kd_vals = np.array([float(kd_spectral_dict[k]) for k in sorted(kd_spectral_dict.keys())])
+                                    if len(kd_wls) > 0:
+                                        kd_interp_plot = np.interp(wls, kd_wls, kd_vals)
+                            elif optics_mode == 'scattering':
+                                mc_input_type = config.get('optics', {}).get('mc_input_type', 'scalar')
+                                if mc_input_type == 'scalar':
+                                    kd_interp_plot = np.full_like(wls, kd_val) # kd_val porta el valor de 'c'
+                                elif mc_input_type == 'bio':
+                                    tss_val = float(config.get('optics', {}).get('tss', 15.0))
+                                    a440_val = float(config.get('optics', {}).get('cdom_a440', 1.0))
+                                    wl_ref = np.array([400, 450, 500, 550, 600, 650, 700])
+                                    b_star_ref = np.array([0.50, 0.42, 0.35, 0.31, 0.28, 0.25, 0.22])
+                                    aw_ref = np.array([0.01, 0.01, 0.02, 0.06, 0.24, 0.35, 0.65])
+                                    spline_b = make_interp_spline(wl_ref, b_star_ref, k=2)
+                                    spline_aw = make_interp_spline(wl_ref, aw_ref, k=2)
+                                    b_star_ray = np.maximum(spline_b(wls), 0)
+                                    aw_ray = np.maximum(spline_aw(wls), 0)
+                                    b_total_ray = b_star_ray * tss_val
+                                    a_cdom_ray = a440_val * np.exp(-0.015 * (wls - 440))
+                                    a_total_ray = aw_ray + a_cdom_ray
+                                    # Para graficar, atenuación efectiva del haz = c
+                                    kd_interp_plot = a_total_ray + b_total_ray
+                                elif mc_input_type == 'json':
+                                    c_dict = config.get('optics', {}).get('c_json', {})
+                                    if c_dict:
+                                        c_wls = np.array([float(k) for k in sorted(c_dict.keys())])
+                                        c_vals = np.array([float(c_dict[k]) for k in sorted(c_dict.keys())])
+                                        if len(c_wls) > 0:
+                                            kd_interp_plot = np.interp(wls, c_wls, c_vals)
+
+                            if config.get('lamps'):
+                                lamp_z = float(config['lamps'][0]['z'])
+                                ref_z = lamp_z if env_type == 'estanque' else -lamp_z
+                            else:
+                                ref_z = 0.0
+
+                            colors_depth = ['#1f77b4', '#d62728', '#2ca02c', '#9467bd', '#8c564b']
+                            
+                            titulo_scen = kd_val if optics_mode != 'scattering' or mc_input_type == 'scalar' else (f"TSS={config.get('optics',{}).get('tss', 15.0)}" if mc_input_type == 'bio' else "JSON Espectral")
+
+                            # 1. Gráfico de Atenuación Absoluta
+                            if config.get('plot_spectrum_attenuation'):
+                                fig_sp_z, ax_sp_z = plt.subplots(figsize=(7, 4))
+                                ax_sp_z.plot(wls, pwrs / np.max(pwrs), 'k--', label="Emisión inicial", linewidth=2)
+
+                                for idx_d, d in enumerate(target_depths_requested[:5]): 
+                                    target_z = float(d) if env_type == 'estanque' else -float(d)
+                                    dist = abs(ref_z - target_z)
+                                    trans_pwrs = pwrs * np.exp(-kd_interp_plot * dist)
+                                    ax_sp_z.plot(wls, trans_pwrs / np.max(pwrs), color=colors_depth[idx_d % len(colors_depth)], label=f"Z = {d}m (\u0394={dist:.1f}m)", linewidth=2)
+
+                                ax_sp_z.set_title(rf"Atenuación absoluta vs profundidad - {xml_name} (Esc: {titulo_scen})")
+                                ax_sp_z.set_xlabel("Longitud de onda [nm]")
+                                ax_sp_z.set_ylabel("Potencia relativa (Referencia = Origen)")
+                                ax_sp_z.legend(loc='upper right')
+                                ax_sp_z.grid(True, linestyle=':', alpha=0.6)
+                                ax_sp_z.set_xlim(380, 780)
+                                ax_sp_z.set_ylim(0, 1.1)
+
+                                buf_sp_z = io.BytesIO()
+                                plt.savefig(buf_sp_z, format='png', bbox_inches='tight', transparent=True)
+                                plt.close(fig_sp_z)
+                                spectrum_results[f"Atenuación Absoluta ({xml_name} - Esc. {kd_val})"] = base64.b64encode(buf_sp_z.getvalue()).decode('utf-8')
+
+                            # 2. Gráfico de Color Shift (Atenuación Normalizada)
+                            if config.get('plot_spectrum_normalized'):
+                                fig_norm, ax_norm = plt.subplots(figsize=(7, 4))
+                                ax_norm.plot(wls, pwrs / np.max(pwrs), 'k--', label="Emisión inicial", linewidth=2)
+
+                                for idx_d, d in enumerate(target_depths_requested[:5]): 
+                                    target_z = float(d) if env_type == 'estanque' else -float(d)
+                                    dist = abs(ref_z - target_z)
+                                    trans_pwrs = pwrs * np.exp(-kd_interp_plot * dist)
+                                    if np.max(trans_pwrs) > 0:
+                                        ax_norm.plot(wls, trans_pwrs / np.max(trans_pwrs), color=colors_depth[idx_d % len(colors_depth)], label=f"Z = {d}m (\u0394={dist:.1f}m)", linewidth=2)
+
+                                ax_norm.set_title(rf"Desplazamiento de color (Normalizado) - {xml_name} (Esc: {titulo_scen})")
+                                ax_norm.set_xlabel("Longitud de onda [nm]")
+                                ax_norm.set_ylabel("Espectro auto-normalizado (Máx = 1.0)")
+                                ax_norm.legend(loc='upper right')
+                                ax_norm.grid(True, linestyle=':', alpha=0.6)
+                                ax_norm.set_xlim(380, 780)
+                                ax_norm.set_ylim(0, 1.1)
+
+                                buf_norm = io.BytesIO()
+                                plt.savefig(buf_norm, format='png', bbox_inches='tight', transparent=True)
+                                plt.close(fig_norm)
+                                spectrum_results[f"Atenuación Normalizada ({xml_name} - Esc. {kd_val})"] = base64.b64encode(buf_norm.getvalue()).decode('utf-8')
+
+
             raw_results = engine.run(config)
             
             kd_res = {"depths": {}, "combined_image": "", "comparison_image": "", "depth_profile_image": "", "aportes": []}
@@ -326,27 +495,26 @@ def run_simulation():
                 z_valid = True
                 
                 if roi['type'] == 'paralelepipedo':
-                    cx, cy, cz = float(roi['cx']), float(roi['cy']), float(roi['cz'])
-                    l, w, h = float(roi['l']), float(roi['w']), float(roi['h'])
+                    cx, cy, cz = float(roi.get('cx', 0)), float(roi.get('cy', 0)), float(roi.get('cz', 0))
+                    l, w, h = float(roi.get('l', 0)), float(roi.get('w', 0)), float(roi.get('h', 0))
                     if abs(depth_val - cz) <= h / 2.0:
                         mask = (np.abs(X - cx) <= l / 2.0) & (np.abs(Y - cy) <= w / 2.0)
                     else:
                         z_valid = False
                         mask = np.zeros_like(E, dtype=bool)
                 elif roi['type'] == 'cilindro':
-                    cx, cy, cz = float(roi['cx']), float(roi['cy']), float(roi['cz'])
-                    r_roi, h = float(roi['r']), float(roi['h'])
+                    cx, cy, cz = float(roi.get('cx', 0)), float(roi.get('cy', 0)), float(roi.get('cz', 0))
+                    r_roi, h = float(roi.get('r', 0)), float(roi.get('h', 0))
                     if abs(depth_val - cz) <= h / 2.0:
                         mask = ((X - cx)**2 + (Y - cy)**2) <= r_roi**2
                     else:
                         z_valid = False
                         mask = np.zeros_like(E, dtype=bool)
                 else: 
-                    # Ignorar env_z si es estanque (ya que la altura está definida por z_interface)
                     if env_type != 'estanque' and depth_val > env_z: 
                         z_valid = False
                         mask = np.zeros_like(E, dtype=bool)
-                    elif env_type == 'estanque' and depth_val > float(config['env'].get('z_interface', 3.2)):
+                    elif env_type == 'estanque' and depth_val > z_interface:
                         z_valid = False
                         mask = np.zeros_like(E, dtype=bool)
                     elif env_shape == 'circle':
@@ -379,7 +547,7 @@ def run_simulation():
                         interp_tot = RegularGridInterpolator((x_centers, y_centers), H / area_bin, bounds_error=False, fill_value=0)
                         E_lamps_interp = []
                         
-                        for i_lamp in range(len(config['lamps'])):
+                        for i_lamp in range(len(config.get('lamps', []))):
                             mask_i = (lamp_idxs == i_lamp)
                             if np.any(mask_i):
                                 H_i, _, _ = np.histogram2d(pts[mask_i,0], pts[mask_i,1], bins=[grid_x, grid_y], weights=vals[mask_i])
@@ -446,7 +614,18 @@ def run_simulation():
                 avg_all = valid_stats[0]['avg'] if len(valid_stats) > 0 else 0
 
             depths_txt = " y ".join([str(d) for d in target_depths_requested])
-            fig_comb.suptitle(f"Irradiancia simulada a {depths_txt} m del fondo (Kd={kd_val})", fontsize=16, fontfamily='serif')
+            
+            mc_input_type = config.get('optics', {}).get('mc_input_type', 'scalar')
+            if optics_mode == 'kd_fijo':
+                titulo_escenario = f"Kd={kd_val}" 
+            elif optics_mode == 'scattering' and mc_input_type == 'bio':
+                titulo_escenario = f"Modelo Bio-Óptico (TSS={config['optics'].get('tss', 15.0)}mg/L)"
+            elif optics_mode == 'scattering' and mc_input_type == 'json':
+                titulo_escenario = "Dispersión Espectral Manual"
+            else:
+                titulo_escenario = f"Atenuación Escalar c={kd_val}"
+                
+            fig_comb.suptitle(f"Irradiancia simulada a {depths_txt} m del fondo ({titulo_escenario})", fontsize=16, fontfamily='serif')
             buf_comb = io.BytesIO()
             plt.savefig(buf_comb, format='png', bbox_inches='tight', transparent=False)
             plt.close(fig_comb)
@@ -488,7 +667,6 @@ def run_simulation():
                 ax_dp.set_xlabel('Irradiancia promedio volumétrica [W/m²] (Log)', color='b', weight='bold')
                 ax_dp.tick_params(axis='x', labelcolor='b')
                 
-                # Etiqueta e inversión dinámica según el modo (Jaula o Estanque)
                 ax_dp.set_ylabel('Profundidad Z [m]' if env_type != 'estanque' else 'Altura desde el fondo [m]', weight='bold')
                 
                 ax_dp.xaxis.set_major_locator(ticker.LogLocator(base=10.0, subs=(1.0, 2.0, 5.0), numticks=15))
@@ -514,7 +692,7 @@ def run_simulation():
                 lines_2, labels_2 = ax_vol.get_legend_handles_labels()
                 ax_dp.legend(lines_1 + lines_2, labels_1 + labels_2, loc='lower right')
                 
-                fig_dp.suptitle(f"Perfil volumétrico acumulado - Kd={kd_val} (Resolución: {profile_step}m)", fontsize=12)
+                fig_dp.suptitle(f"Perfil volumétrico acumulado - {titulo_escenario} (Resolución: {profile_step}m)", fontsize=12)
                 plt.tight_layout()
                 
                 buf_dp = io.BytesIO()
@@ -537,7 +715,7 @@ def run_simulation():
                 if env_type != 'estanque':
                     ax_comp.invert_yaxis()
                     
-                ax_comp.set_title(rf"Atenuación: Simulación vs Medición en $(X={config['compare_x']}, Y={config['compare_y']})$ | Kd={kd_val}")
+                ax_comp.set_title(rf"Atenuación: Simulación vs Medición en $(X={config['compare_x']}, Y={config['compare_y']})$ | {titulo_escenario}")
                 ax_comp.set_xlabel(r"Irradiancia $[W/m^2]$")
                 ax_comp.text(0.95, 0.05, f"Métricas:\n$R^2$: {r2:.4f}\nRMSE: {rmse:.4f}", transform=ax_comp.transAxes, fontsize=10,
                              verticalalignment='bottom', horizontalalignment='right', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
@@ -551,13 +729,22 @@ def run_simulation():
 
             results_by_kd[str(kd_val)] = kd_res
             min_irr_all = 0 if min_irr_all == 999999 else min_irr_all
-            power_eff = sum([float(l.get('power', 0)) * float(l.get('dim', 1.0)) for l in config['lamps']])
-            lamps_str = ", ".join(list(set([l['xml'].replace('.xml','').replace('.ies', '') for l in config['lamps']])))
-            pos_str = " | ".join([f"({l['x']}, {l['y']}, {l['z']})" for l in config['lamps']])
-            secchi_eq = 1.7 / kd_val if kd_val > 0 else 0
+            
+            # Recalcular power efectivo final considerando los multiplicadores automáticos
+            power_eff = 0
+            for l in config.get('lamps', []):
+                req = float(l.get('power', 0))
+                power_eff += req if req > 0 else 0
+                
+            lamps_str = ", ".join(list(set([l['xml'].replace('.xml','').replace('.ies', '') for l in config.get('lamps', [])])))
+            pos_str = " | ".join([f"({l['x']}, {l['y']}, {l['z']})" for l in config.get('lamps', [])])
+            
+            if optics_mode == 'kd_fijo': secchi_eq = (1.7 / kd_val if kd_val > 0 else 0)
+            elif optics_mode == 'scattering' and mc_input_type == 'scalar': secchi_eq = (4.8 / kd_val if kd_val > 0 else 0) 
+            else: secchi_eq = 0
 
             table_data.append({
-                "kd": kd_val, "avg": avg_all, "max": max_irr_all, "min": min_irr_all,
+                "kd": f"{kd_val} ({optics_mode})", "avg": avg_all, "max": max_irr_all, "min": min_irr_all,
                 "vol_pct": vol_pct, "power_eff": power_eff, "lamps_str": lamps_str, "pos_str": pos_str, "secchi": secchi_eq
             })
 
@@ -581,6 +768,7 @@ if __name__ == '__main__':
         if f.lower().endswith('.xml') or f.lower().endswith('.ies'):
             filepath = os.path.join(UPLOAD_FOLDER, f)
             try:
-                with open(filepath, 'r', encoding='utf-8', errors='ignore') as file: engine.load_file(f, file.read())
+                with open(filepath, 'r', encoding='utf-8', errors='ignore') as file: 
+                    engine.load_file(f, file.read())
             except Exception: pass
     app.run(debug=True, port=5001)
