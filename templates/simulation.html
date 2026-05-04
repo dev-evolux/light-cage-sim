@@ -12,9 +12,12 @@
         
         .sidebar { width: 420px !important; }
         
-        input[type="number"], input[type="text"], input[type="file"], select { 
+        input[type="number"], input[type="text"], input[type="file"], select, textarea { 
             font-size: 13px !important; 
             padding: 6px !important; 
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            box-sizing: border-box;
         }
 
         .panel h4 { text-transform: uppercase; font-size: 16px; font-weight: 900; letter-spacing: 0.5px; color: #1a252f; border-bottom: 2px solid var(--evolux-yellow); padding-bottom: 6px; margin-top: 0; }
@@ -75,7 +78,7 @@
         <div class="panel">
             <h4>GEOMETRÍA</h4>
             <span style="font-size:12px; color:#666; display:block; margin-top:-5px; margin-bottom:10px;">*Para delimitar físicamente el entorno y dibujar simetrías.</span>
-            
+
             <div class="input-group" id="env_z_container" style="display: none;">
                 <label><strong>Profundidad total Z</strong> <span class="normal-case">(m)</span></label>
                 <input type="number" id="env_z" value="15" step="0.5" onchange="updateScene()">
@@ -83,7 +86,7 @@
 
             <div class="input-group">
                 <label><strong>Forma del espacio</strong></label>
-                <select id="env_shape" style="width: 100%; font-size:13px; margin-bottom: 5px;" onchange="toggleShapePanel()">
+                <select id="env_shape" style="width: 100%; margin-bottom: 5px;" onchange="toggleShapePanel()">
                     <option value="circle">Circular (Radio)</option>
                     <option value="rect">Rectangular (Largo y Ancho)</option>
                 </select>
@@ -161,10 +164,78 @@
                 </div>
             </div>
 
+            <!-- SECCIÓN ÓPTICA RENOVADA -->
             <div class="input-group" style="padding: 10px; background: #fdfdfd; border: 1px solid #ccc; border-radius: 4px; margin-top: 10px;">
-                <label><strong>Kd</strong> <span class="normal-case">(único o múltiples a comparar, separados por coma)</span></label>
-                <input type="text" id="kd_list" value="0.20, 0.35" oninput="updateSecchi()">
-                <div id="secchi_display" style="font-size:13px; color:#1f77b4; margin-top:6px; font-weight: bold;"></div>
+                <label><strong>Modo Óptico</strong></label>
+                <select id="optics_mode" style="width: 100%; margin-bottom: 10px;" onchange="toggleOpticsPanel()">
+                    <option value="kd_fijo">1. Kd Fijo (Atenuación Simple)</option>
+                    <option value="kd_espectral">2. Kd Espectral</option>
+                    <option value="scattering">3. Trazado 3D Dispersivo (Monte Carlo)</option>
+                </select>
+
+                <!-- Panel 1: Kd Fijo -->
+                <div id="optics_kd_fijo">
+                    <label><strong>Kd</strong> <span class="normal-case">(separados por coma)</span></label>
+                    <input type="text" id="kd_list" value="0.20, 0.35" oninput="updateSecchi()">
+                    <div id="secchi_display" style="font-size:13px; color:#1f77b4; margin-top:6px; font-weight: bold;"></div>
+                </div>
+
+                <!-- Panel 2: Kd Espectral -->
+                <div id="optics_kd_espectral" style="display:none;">
+                    <label><strong>Kd(λ)</strong> <span class="normal-case">(JSON [nm: Kd])</span></label>
+                    <textarea id="kd_spectral_json" rows="2" style="width: 100%; font-family:monospace;">{"400": 0.2, "500": 0.15, "600": 0.35, "700": 0.7}</textarea>
+                </div>
+
+                <!-- Panel 3: Scattering (Monte Carlo) -->
+                <div id="optics_scattering" style="display:none; border-top: 2px solid var(--evolux-yellow); padding-top: 10px; margin-top: 10px;">
+                    <label><strong>Ingreso de parámetros (Monte Carlo)</strong></label>
+                    <select id="mc_input_type" style="width: 100%; font-size:12px; margin-bottom: 10px;" onchange="toggleScatteringMode()">
+                        <option value="bio">Modelo Bio-Óptico Empírico (Recomendado)</option>
+                        <option value="scalar">Valores Escalares Globales</option>
+                        <option value="json">Distribución Espectral Manual (JSON)</option>
+                    </select>
+                    
+                    <!-- Subpanel: Bio-Óptico -->
+                    <div id="scat_bio" style="background:#e3f2fd; padding:10px; border-radius:4px; margin-bottom:10px;">
+                        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:5px;">
+                            <div>
+                                <label>TSS (mg/L)</label>
+                                <input type="number" id="scat_tss" value="15.0" step="0.5" style="width:100%;">
+                            </div>
+                            <div>
+                                <label>Carga Orgánica (CDOM)</label>
+                                <select id="scat_cdom" style="width:100%;">
+                                    <option value="0.3">Agua Clara</option>
+                                    <option value="1.0" selected>Estándar (RAS)</option>
+                                    <option value="3.0">Carga Alta</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Subpanel: Escalar -->
+                    <div id="scat_scalar" style="display:none; background:#f4f8fb; padding:10px; border-radius:4px; margin-bottom:10px;">
+                        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:5px;">
+                            <div><label>Atenuación (c)</label><input type="number" id="scatter_c" value="0.5" step="0.1"></div>
+                            <div><label>Albedo (ω)</label><input type="number" id="scatter_omega" value="0.8" step="0.05"></div>
+                        </div>
+                    </div>
+
+                    <!-- Subpanel: JSON Espectral -->
+                    <div id="scat_spectral" style="display:none; background:#f4f8fb; padding:10px; border-radius:4px; margin-bottom:10px;">
+                        <label><strong>Atenuación Haz c(λ)</strong> <span class="normal-case">(JSON [nm: c])</span></label>
+                        <textarea id="scatter_c_json" rows="2" style="width: 100%; font-family:monospace; margin-bottom:5px;">{"400": 1.2, "500": 0.5, "600": 1.0, "700": 2.0}</textarea>
+                        
+                        <label><strong>Albedo Dispersión ω(λ)</strong> <span class="normal-case">(JSON [nm: w])</span></label>
+                        <textarea id="scatter_omega_json" rows="2" style="width: 100%; font-family:monospace;">{"400": 0.6, "500": 0.9, "600": 0.7, "700": 0.3}</textarea>
+                    </div>
+
+                    <!-- Compartidos del Scatter -->
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:5px; padding: 0 5px;">
+                        <div><label>Fase Asimetría (g)</label><input type="number" id="scatter_g" value="0.85" step="0.05"></div>
+                        <div id="wall_albedo_container"><label>Albedo Pared Estanque</label><input type="number" id="scatter_rwall" value="0.15" step="0.05"></div>
+                    </div>
+                </div>
             </div>
 
             <div class="input-group" style="margin-top: 12px;">
@@ -190,7 +261,6 @@
                 </div>
             </div>
 
-            <!-- NUEVO PARÁMETRO: Escala de colores -->
             <div class="input-group" style="margin-top: 10px; padding-left: 10px;">
                 <label><strong>Escala de colores (Mapas de calor)</strong></label>
                 <select id="color_scale_type" style="width: 100%; font-size:12px;">
@@ -264,13 +334,23 @@
                         <input type="number" id="profile_step" value="0.5" step="0.1" style="width: 50px; padding: 2px !important;">
                     </div>
                 </div>
-                <div class="checklist-item" style="margin-top: 5px;">
-                    <input type="checkbox" id="plot_spectrum" onchange="toggleSpectrumPanel()" style="width:auto;"> <span class="normal-case">Espectro de lámparas</span>
+                
+                <!-- CHECKBOXES DE ESPECTROS SEPARADOS -->
+                <div style="margin-top: 10px; margin-bottom: 5px; font-size: 12px;"><strong>Gráficos de Espectro (Lámparas marcadas abajo)</strong></div>
+                <div class="checklist-item" style="margin-left: 10px;">
+                    <input type="checkbox" id="plot_spectrum_initial" onchange="toggleSpectrumPanel()" style="width:auto;"> <span class="normal-case">Emisión Inicial de Lámparas (0m)</span>
                 </div>
-                <div id="spectrum_panel" style="display:none; margin-left: 20px; margin-top: 5px; padding: 10px; border-left: 2px solid var(--evolux-yellow); background: #fdfdfd;">
-                    <div style="font-size: 13px; margin-bottom: 5px;"><strong>Modelos:</strong></div>
+                <div class="checklist-item" style="margin-left: 10px;">
+                    <input type="checkbox" id="plot_spectrum_attenuation" onchange="toggleSpectrumPanel()" style="width:auto;"> <span class="normal-case">Atenuación Absoluta vs Profundidad</span>
+                </div>
+                <div class="checklist-item" style="margin-left: 10px;">
+                    <input type="checkbox" id="plot_spectrum_normalized" onchange="toggleSpectrumPanel()" style="width:auto;"> <span class="normal-case">Color Shift (Atenuación Normalizada)</span>
+                </div>
+                
+                <div id="spectrum_panel" style="display:none; margin-left: 20px; margin-top: 10px; padding: 10px; border-left: 2px solid var(--evolux-yellow); background: #fdfdfd;">
+                    <div style="font-size: 13px; margin-bottom: 5px;"><strong>Seleccionar Modelos:</strong></div>
                     <div id="spectrum_lamp_list" style="margin-bottom: 10px; max-height: 80px; overflow-y: auto;"></div>
-                    <div style="font-size: 13px; margin-bottom: 5px;"><strong>Rangos (nm):</strong></div>
+                    <div style="font-size: 13px; margin-bottom: 5px;"><strong>Rangos para Áreas bajo la curva (nm):</strong></div>
                     <div style="display: flex; gap: 5px; font-size: 12px; margin-bottom: 3px; align-items: center;"><span style="color: #1f77b4; width: 40px; font-weight: bold;">Azul:</span> <input type="number" id="spec_b_min" value="400" style="width:55px;"> - <input type="number" id="spec_b_max" value="499" style="width:55px;"></div>
                     <div style="display: flex; gap: 5px; font-size: 12px; margin-bottom: 3px; align-items: center;"><span style="color: #2ca02c; width: 40px; font-weight: bold;">Verde:</span> <input type="number" id="spec_g_min" value="500" style="width:55px;"> - <input type="number" id="spec_g_max" value="599" style="width:55px;"></div>
                     <div style="display: flex; gap: 5px; font-size: 12px; align-items: center;"><span style="color: #d62728; width: 40px; font-weight: bold;">Rojo:</span> <input type="number" id="spec_r_min" value="600" style="width:55px;"> - <input type="number" id="spec_r_max" value="750" style="width:55px;"></div>
@@ -295,9 +375,20 @@
 
     </div>
 
+    <!-- EL PANEL CENTRAL DONDE SE DIBUJA LA PREVISUALIZACIÓN Y RESULTADOS -->
     <div class="workspace" id="main_workspace">
         
-        <div class="graph-wrapper" id="preview_wrapper" style="width: 100%; flex-shrink: 0; margin-bottom: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1);">
+        <div id="progress_wrapper" style="display: none; width: 100%; margin-bottom: 15px; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-left: 4px solid var(--evolux-yellow); box-sizing: border-box; grid-column: 1 / -1;">
+            <div style="display:flex; justify-content: space-between; margin-bottom: 8px;">
+                <strong style="color: var(--evolux-black); font-size: 13px;" id="progress_status">Inicializando Motor de Simulación...</strong>
+                <span style="font-size: 13px; font-weight: bold; color: #1f77b4;" id="progress_pct_text">0%</span>
+            </div>
+            <div style="width: 100%; background-color: #e9ecef; border-radius: 4px; overflow: hidden; height: 12px;">
+                <div id="progress_bar_fill" style="width: 0%; height: 100%; background-color: #1f77b4; transition: width 0.4s ease;"></div>
+            </div>
+        </div>
+
+        <div class="graph-wrapper" id="preview_wrapper" style="width: 100%; flex-shrink: 0; margin-bottom: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); grid-column: 1 / -1;">
             <div class="graph-title" style="display:flex; justify-content:space-between; align-items:center;">
                 <span>VISTA PREVIA INTERACTIVA DEL ESPACIO</span>
                 <div style="display: flex; gap: 15px; align-items: center;">
@@ -308,7 +399,7 @@
             <div id="heatmap_div_preview" style="width: 100%; height: 500px;"></div>
         </div>
         
-        <div id="results_dynamic_area" style="display: flex; flex-direction: column; gap: 20px; width: 100%;"></div>
+        <div id="results_dynamic_area" style="display: contents; width: 100%;"></div>
     </div>
     
     <div class="right-sidebar" id="summary_container">
@@ -328,6 +419,7 @@
     window.lampProfiles = {}; 
     let lampCount = 0; 
     let currentAbortController = null;
+    let progressInterval = null; 
 
     const modeConfigs = {
         'estanque': { type: 'estanque', shape: 'circle', radio: 10, z_water: 3.2, env_z: 15.0, depths: '2.0, 1.0', kd_list: '0.20', n1: 1.0, n2: 1.33 },
@@ -354,6 +446,20 @@
         } catch(e) { console.error("Error trayendo curva polar", e); }
     }
 
+    function toggleOpticsPanel() {
+        const mode = document.getElementById('optics_mode').value;
+        document.getElementById('optics_kd_fijo').style.display = mode === 'kd_fijo' ? 'block' : 'none';
+        document.getElementById('optics_kd_espectral').style.display = mode === 'kd_espectral' ? 'block' : 'none';
+        document.getElementById('optics_scattering').style.display = mode === 'scattering' ? 'block' : 'none';
+    }
+
+    function toggleScatteringMode() {
+        const val = document.getElementById('mc_input_type').value;
+        document.getElementById('scat_bio').style.display = val === 'bio' ? 'block' : 'none';
+        document.getElementById('scat_scalar').style.display = val === 'scalar' ? 'block' : 'none';
+        document.getElementById('scat_spectral').style.display = val === 'json' ? 'block' : 'none';
+    }
+
     function toggleRoiPanel() {
         const type = document.getElementById('roi_type').value;
         document.getElementById('roi_paral_panel').style.display = type === 'paralelepipedo' ? 'block' : 'none';
@@ -361,11 +467,20 @@
         updateScene();
     }
 
+    function toggleShapePanel() {
+        const shape = document.getElementById('env_shape').value;
+        document.getElementById('shape_circle_inputs').style.display = shape === 'circle' ? 'block' : 'none';
+        document.getElementById('shape_rect_inputs').style.display = shape === 'rect' ? 'block' : 'none';
+        updateScene();
+    }
+
     function updateSecchi() {
+        const secchiEl = document.getElementById('secchi_display');
+        if (!secchiEl) return;
         const kdRaw = document.getElementById('kd_list').value;
         const kds = kdRaw.split(',').map(v => parseFloat(v.trim())).filter(v => !isNaN(v) && v > 0);
         const secchis = kds.map(kd => (1.7 / kd).toFixed(2) + 'm');
-        document.getElementById('secchi_display').innerHTML = secchis.length ? `Eq. Disco Secchi: ${secchis.join(' | ')}` : '';
+        secchiEl.innerHTML = secchis.length ? `Eq. Disco Secchi: ${secchis.join(' | ')}` : '';
     }
 
     function handleMeasurementUpload(event) {
@@ -452,6 +567,7 @@
         }).then(r => r.json()).then(data => {
             if (data.status === 'ok') {
                 const resArea = document.getElementById('results_dynamic_area');
+                if(!resArea) return;
                 let html = `<div class="graph-wrapper result-graph" style="border-top: 4px solid #1f77b4; width: 100%;">
                                 <div class="graph-title" style="color:#1f77b4;">Resultados Kd Empírico en (X=${targetX}, Y=${targetY})</div>
                                 <div style="display:flex; flex-direction:column; gap:5px; padding:10px;">`;
@@ -473,8 +589,6 @@
         const config = modeConfigs[document.getElementById('mode-selector').value] || modeConfigs['estanque'];
         if(config) {
             currentSpaceType = config.type;
-            document.getElementById('env_z').value = config.env_z;
-            
             document.getElementById('env_shape').value = config.shape;
 
             if(config.type === 'estanque') {
@@ -485,14 +599,17 @@
                 document.getElementById('z_water').value = config.z_water;
                 document.getElementById('env_n1_container').style.display = 'block';
                 document.getElementById('env_n2_label').innerHTML = '<strong>Índice ref. medio 2</strong> <span class="normal-case">(Agua)</span>';
+                document.getElementById('wall_albedo_container').style.display = 'block';
             } else {
                 document.getElementById('env_z_container').style.display = 'block';
                 document.getElementById('env_x').value = config.env_x;
                 document.getElementById('env_y').value = config.env_y;
+                document.getElementById('env_z').value = config.env_z;
                 
                 document.getElementById('z_water_container').style.display = 'none';
                 document.getElementById('env_n1_container').style.display = 'none';
                 document.getElementById('env_n2_label').innerHTML = '<strong>Índice ref. medio</strong> <span class="normal-case">(Agua)</span>';
+                document.getElementById('wall_albedo_container').style.display = 'none';
             }
             
             toggleShapePanel();
@@ -501,20 +618,17 @@
             document.getElementById('target_depths').value = config.depths;
             document.getElementById('env_n1').value = config.n1 || 1.0;
             document.getElementById('env_n2').value = config.n2 || 1.33;
+            
             updateSecchi();
             updateScene(); updateLampLabels();
         }
     }
 
-    function toggleShapePanel() {
-        const shape = document.getElementById('env_shape').value;
-        document.getElementById('shape_circle_inputs').style.display = shape === 'circle' ? 'block' : 'none';
-        document.getElementById('shape_rect_inputs').style.display = shape === 'rect' ? 'block' : 'none';
-        updateScene();
-    }
-
     function toggleSpectrumPanel() {
-        document.getElementById('spectrum_panel').style.display = document.getElementById('plot_spectrum').checked ? 'block' : 'none';
+        const show = document.getElementById('plot_spectrum_initial').checked || 
+                     document.getElementById('plot_spectrum_attenuation').checked || 
+                     document.getElementById('plot_spectrum_normalized').checked;
+        document.getElementById('spectrum_panel').style.display = show ? 'block' : 'none';
     }
 
     function updateUniqueLampsForSpectrum() {
@@ -569,6 +683,7 @@
     function getPlotTraces() {
         const traces = [];
         const dims = getSpaceDimensions();
+        const zInterface = parseFloat(document.getElementById('z_water').value) || 0;
 
         const bgSize = 20;
         const zBg = Array(bgSize).fill().map(() => Array(bgSize).fill(0));
@@ -631,6 +746,7 @@
         document.querySelectorAll('.lamp-item').forEach((item, index) => {
             let x = parseFloat(item.querySelector('.lamp-x').value) || 0;
             let y = parseFloat(item.querySelector('.lamp-y').value) || 0;
+            let z = parseFloat(item.querySelector('.lamp-z').value) || 0;
             let rx = parseFloat(item.querySelector('.lamp-rot-x').value) || 0;
             let ry = parseFloat(item.querySelector('.lamp-rot-y').value) || 0;
             let rz = parseFloat(item.querySelector('.lamp-rot-z').value) || 0;
@@ -645,6 +761,10 @@
                 const cosX = Math.cos(radX), sinX = Math.sin(radX);
                 const cosY = Math.cos(radY), sinY = Math.sin(radY);
                 const cosZ = Math.cos(radZ), sinZ = Math.sin(radZ);
+                
+                let isAerial = (currentSpaceType === 'estanque' && z > zInterface) || (currentSpaceType === 'jaula' && z < 0);
+                let polyColor = isAerial ? 'rgba(255, 199, 44, 0.8)' : 'rgba(0, 191, 255, 0.8)';
+                let polyFill = isAerial ? 'rgba(255, 199, 44, 0.25)' : 'rgba(0, 191, 255, 0.25)';
 
                 function projectPlane(planeData, isC90) {
                     let ptsX = [], ptsY = [];
@@ -677,13 +797,13 @@
 
                 traces.push({
                     x: p0.x, y: p0.y, mode: 'lines', fill: 'toself',
-                    fillcolor: 'rgba(255, 199, 44, 0.25)', line: {color: 'rgba(255, 199, 44, 0.8)', width: 2},
+                    fillcolor: polyFill, line: {color: polyColor, width: 2},
                     hoverinfo: 'none', showlegend: false, name: `L${index+1} C0`
                 });
 
                 traces.push({
                     x: p90.x, y: p90.y, mode: 'lines', fill: 'toself',
-                    fillcolor: 'rgba(31, 119, 180, 0.15)', line: {color: 'rgba(31, 119, 180, 0.8)', width: 2, dash: 'dot'},
+                    fillcolor: 'rgba(31, 119, 180, 0.1)', line: {color: polyColor, width: 2, dash: 'dot'},
                     hoverinfo: 'none', showlegend: false, name: `L${index+1} C90`
                 });
             } else {
@@ -757,16 +877,22 @@
             shapes: [], annotations: []
         };
 
+        const zInterface = parseFloat(document.getElementById('z_water').value) || 0;
+
         document.querySelectorAll('.lamp-item').forEach((item, index) => {
             let x = parseFloat(item.querySelector('.lamp-x').value) || 0;
             let y = parseFloat(item.querySelector('.lamp-y').value) || 0;
+            let z = parseFloat(item.querySelector('.lamp-z').value) || 0;
             let rx = parseFloat(item.querySelector('.lamp-rot-x').value) || 0;
             let ry = parseFloat(item.querySelector('.lamp-rot-y').value) || 0;
             
+            let isAerial = (currentSpaceType === 'estanque' && z > zInterface) || (currentSpaceType === 'jaula' && z < 0);
+            let coreColor = isAerial ? 'var(--evolux-yellow)' : '#00bfff';
+
             layout.shapes.push({
                 type: 'circle',
                 x0: x - 0.4, y0: y - 0.4, x1: x + 0.4, y1: y + 0.4,
-                fillcolor: 'var(--evolux-yellow)', line: { color: 'black', width: 2 }
+                fillcolor: coreColor, line: { color: 'black', width: 2 }
             });
 
             if (rx !== 0 || ry !== 0) {
@@ -864,10 +990,28 @@
             lampCount++;
             const container = document.getElementById('lamp-list');
             const dims = getSpaceDimensions();
-            const defaultX = dims.shape === 'circle' ? dims.radius : dims.x / 2;
-            const defaultY = dims.shape === 'circle' ? dims.radius : dims.y / 2;
-            let defaultZ = 2.0;
-            if (currentSpaceType === 'estanque') defaultZ = parseFloat(document.getElementById('z_water').value) + 0.5;
+            
+            let defaultX = dims.shape === 'circle' ? dims.radius : dims.x / 2;
+            let defaultY = dims.shape === 'circle' ? dims.radius : dims.y / 2;
+            let defaultZ = currentSpaceType === 'estanque' ? parseFloat(document.getElementById('z_water').value) + 0.5 : 2.0;
+            let defaultPower = 600;
+            let defaultRotX = 0;
+            let defaultRotY = 0;
+            let defaultRotZ = 0;
+
+            const lastLamp = document.querySelector('.lamp-item:last-child');
+            if (lastLamp) {
+                const lastModel = lastLamp.querySelector('.lamp-xml').value;
+                if (lastModel === model) {
+                    defaultX = parseFloat(lastLamp.querySelector('.lamp-x').value) || defaultX;
+                    defaultY = parseFloat(lastLamp.querySelector('.lamp-y').value) || defaultY;
+                    defaultZ = parseFloat(lastLamp.querySelector('.lamp-z').value) || defaultZ;
+                    defaultPower = parseFloat(lastLamp.querySelector('.lamp-power').value) || defaultPower;
+                    defaultRotX = parseFloat(lastLamp.querySelector('.lamp-rot-x').value) || 0;
+                    defaultRotY = parseFloat(lastLamp.querySelector('.lamp-rot-y').value) || 0;
+                    defaultRotZ = parseFloat(lastLamp.querySelector('.lamp-rot-z').value) || 0;
+                }
+            }
 
             const zLabelText = currentSpaceType === 'estanque' ? 'Altura desde el fondo (m)' : 'Profundidad (m)';
 
@@ -877,15 +1021,19 @@
                 <div style="font-weight:900; color:#1a252f; margin-bottom:8px; text-transform: uppercase; font-size: 13px;">${lampCount}. ${model}</div>
                 <button type="button" class="btn-remove" onclick="removeLamp(${lampCount})">×</button>
                 <input type="hidden" class="lamp-xml" value="${model}">
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 12px;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; font-size: 12px;">
                     <div><strong>X:</strong> <input type="number" class="lamp-x" value="${defaultX}" style="width:100%; padding:5px;" oninput="updateScene()"></div>
                     <div><strong>Y:</strong> <input type="number" class="lamp-y" value="${defaultY}" style="width:100%; padding:5px;" oninput="updateScene()"></div>
-                    <div style="grid-column: span 2;" class="z-label-container"><strong>${zLabelText}:</strong> <input type="number" class="lamp-z" value="${defaultZ}" style="width:100%; padding:5px;" oninput="updateScene()"></div>
-                    <div style="grid-column: span 2;"><strong>Potencia nominal (W)*:</strong> <input type="number" class="lamp-power" value="600" style="width:100%; padding:5px;"></div>
-                    <div><strong>Dim:</strong> <input type="number" class="lamp-dim" value="1.0" step="0.1" max="1" style="width:100%; padding:5px;"></div>
-                    <div><strong>Rot X°:</strong> <input type="number" class="lamp-rot-x" value="0" style="width:100%; padding:5px;" oninput="updateScene()"></div>
-                    <div><strong>Rot Y°:</strong> <input type="number" class="lamp-rot-y" value="0" style="width:100%; padding:5px;" oninput="updateScene()"></div>
-                    <div><strong>Rot Z°:</strong> <input type="number" class="lamp-rot-z" value="0" style="width:100%; padding:5px;" oninput="updateScene()"></div>
+                    <div><strong>${zLabelText}:</strong> <input type="number" class="lamp-z" value="${defaultZ}" style="width:100%; padding:5px;" oninput="updateScene()"></div>
+                    
+                    <div style="grid-column: span 3; background:#fffae6; padding: 5px; border-radius: 4px; border: 1px solid var(--evolux-yellow);">
+                        <strong>Potencia nominal y de operación (W):</strong> 
+                        <input type="number" class="lamp-power" value="${defaultPower}" style="width:100%; padding:5px;">
+                    </div>
+                    
+                    <div><strong>Rot X°:</strong> <input type="number" class="lamp-rot-x" value="${defaultRotX}" style="width:100%; padding:5px;" oninput="updateScene()"></div>
+                    <div><strong>Rot Y°:</strong> <input type="number" class="lamp-rot-y" value="${defaultRotY}" style="width:100%; padding:5px;" oninput="updateScene()"></div>
+                    <div><strong>Rot Z°:</strong> <input type="number" class="lamp-rot-z" value="${defaultRotZ}" style="width:100%; padding:5px;" oninput="updateScene()"></div>
                 </div>
             `;
             container.appendChild(div);
@@ -899,6 +1047,15 @@
         if(currentAbortController) {
             currentAbortController.abort();
             currentAbortController = null;
+        }
+    }
+
+    function parseJsonSafe(id) {
+        try {
+            const el = document.getElementById(id);
+            return el ? JSON.parse(el.value) : {};
+        } catch(e) {
+            return {};
         }
     }
 
@@ -937,20 +1094,22 @@
         document.querySelectorAll('.lamp-item').forEach(item => {
             lamps.push({
                 xml: item.querySelector('.lamp-xml').value,
-                x: parseFloat(item.querySelector('.lamp-x').value), y: parseFloat(item.querySelector('.lamp-y').value), z: parseFloat(item.querySelector('.lamp-z').value),
-                power: parseFloat(item.querySelector('.lamp-power').value), dim: parseFloat(item.querySelector('.lamp-dim').value),
-                rot_x: parseFloat(item.querySelector('.lamp-rot-x').value) || 0, rot_y: parseFloat(item.querySelector('.lamp-rot-y').value) || 0, rot_z: parseFloat(item.querySelector('.lamp-rot-z').value) || 0
+                x: parseFloat(item.querySelector('.lamp-x').value) || 0, 
+                y: parseFloat(item.querySelector('.lamp-y').value) || 0, 
+                z: parseFloat(item.querySelector('.lamp-z').value) || 0,
+                power: parseFloat(item.querySelector('.lamp-power').value) || 0, 
+                rot_x: parseFloat(item.querySelector('.lamp-rot-x').value) || 0, 
+                rot_y: parseFloat(item.querySelector('.lamp-rot-y').value) || 0, 
+                rot_z: parseFloat(item.querySelector('.lamp-rot-z').value) || 0
             });
         });
         if(lamps.length === 0) { alert("Agregue lámparas."); return null; }
 
         const spectrum_lamps = [];
-        if (document.getElementById('plot_spectrum').checked) document.querySelectorAll('.spectrum-lamp-cb:checked').forEach(cb => spectrum_lamps.push(cb.value));
+        if (document.getElementById('plot_spectrum_initial').checked || document.getElementById('plot_spectrum_attenuation').checked || document.getElementById('plot_spectrum_normalized').checked) {
+            document.querySelectorAll('.spectrum-lamp-cb:checked').forEach(cb => spectrum_lamps.push(cb.value));
+        }
         
-        let kdListRaw = document.getElementById('kd_list').value;
-        let kdList = kdListRaw.split(',').map(v => parseFloat(v.trim())).filter(v => !isNaN(v));
-        if (kdList.length === 0) kdList = [0.2];
-
         let roi = { type: document.getElementById('roi_type').value };
         if (roi.type === 'paralelepipedo') {
             roi.l = parseFloat(document.getElementById('roi_p_l').value) || 0;
@@ -968,6 +1127,23 @@
         }
 
         const dims = getSpaceDimensions();
+        const optics_mode = document.getElementById('optics_mode').value;
+        const mc_input_type = document.getElementById('mc_input_type').value;
+        
+        let kdList = [];
+        if (optics_mode === 'kd_fijo') {
+            kdList = document.getElementById('kd_list').value.split(',').map(v => parseFloat(v.trim())).filter(v => !isNaN(v));
+            if (kdList.length === 0) kdList = [0.2];
+        } else if (optics_mode === 'scattering') {
+            if (mc_input_type === 'scalar') {
+                const c_val = parseFloat(document.getElementById('scatter_c').value);
+                kdList = isNaN(c_val) ? [0.5] : [c_val];
+            } else {
+                kdList = [0.0];
+            }
+        } else {
+            kdList = [0.0];
+        }
 
         return {
             env: { 
@@ -986,19 +1162,75 @@
                 dist: parseFloat(document.getElementById('poly_dist').value) || 0
             },
             roi: roi,
-            target_depths: depthsArray, kd_list: kdList, rays: parseInt(document.getElementById('rays_count').value) || 50000,
-            draw_contour: document.getElementById('draw_contour').checked, contour_val: parseFloat(document.getElementById('contour_val').value) || 0.017,
+            optics_mode: optics_mode,
+            optics: {
+                kd_fijo: kdList[0],
+                kd_spectral: parseJsonSafe('kd_spectral_json'),
+                mc_input_type: mc_input_type,
+                tss: parseFloat(document.getElementById('scat_tss').value) || 15.0,
+                cdom_a440: parseFloat(document.getElementById('scat_cdom').value) || 1.0,
+                c: parseFloat(document.getElementById('scatter_c').value) || 0.5,
+                omega: parseFloat(document.getElementById('scatter_omega').value) || 0.8,
+                g: parseFloat(document.getElementById('scatter_g').value) || 0.85,
+                r_wall: parseFloat(document.getElementById('scatter_rwall').value) || 0.15,
+                c_json: parseJsonSafe('scatter_c_json'),
+                omega_json: parseJsonSafe('scatter_omega_json')
+            },
+            kd_list: kdList,
+            target_depths: depthsArray, 
+            rays: parseInt(document.getElementById('rays_count').value) || 50000,
+            draw_contour: document.getElementById('draw_contour').checked, 
+            contour_val: parseFloat(document.getElementById('contour_val').value) || 0.017,
             color_scale_type: document.getElementById('color_scale_type').value,
+            
             plot_depth_profile: document.getElementById('plot_depth_profile').checked,
             profile_step: parseFloat(document.getElementById('profile_step').value) || 0.5,
-            plot_spectrum: document.getElementById('plot_spectrum').checked, spectrum_lamps: spectrum_lamps,
-            spectrum_ranges: { 'blue': [parseFloat(document.getElementById('spec_b_min').value) || 400, parseFloat(document.getElementById('spec_b_max').value) || 499], 'green': [parseFloat(document.getElementById('spec_g_min').value) || 500, parseFloat(document.getElementById('spec_g_max').value) || 599], 'red': [parseFloat(document.getElementById('spec_r_min').value) || 600, parseFloat(document.getElementById('spec_r_max').value) || 750] },
+            
+            plot_spectrum_initial: document.getElementById('plot_spectrum_initial').checked, 
+            plot_spectrum_attenuation: document.getElementById('plot_spectrum_attenuation').checked, 
+            plot_spectrum_normalized: document.getElementById('plot_spectrum_normalized').checked, 
+            spectrum_lamps: spectrum_lamps,
+            spectrum_ranges: { 
+                'blue': [parseFloat(document.getElementById('spec_b_min').value) || 400, parseFloat(document.getElementById('spec_b_max').value) || 499], 
+                'green': [parseFloat(document.getElementById('spec_g_min').value) || 500, parseFloat(document.getElementById('spec_g_max').value) || 599], 
+                'red': [parseFloat(document.getElementById('spec_r_min').value) || 600, parseFloat(document.getElementById('spec_r_max').value) || 750] 
+            },
             compare_measurements: isCompareMode, compare_x: compare_x, compare_y: compare_y, measurements: isCompareMode ? window.measurements : [],
             aporte_puntos: aporte_puntos,
             aporte_puntos_raw: document.getElementById('aporte_puntos').value,
             lamps: lamps,
-            summary_cols: { lamps: document.getElementById('col_lamps').checked, pos: document.getElementById('col_pos').checked, power: document.getElementById('col_power').checked, vol: document.getElementById('col_vol').checked }
+            summary_cols: { 
+                lamps: document.getElementById('col_lamps').checked, 
+                pos: document.getElementById('col_pos').checked, 
+                power: document.getElementById('col_power').checked, 
+                vol: document.getElementById('col_vol').checked 
+            }
         };
+    }
+
+    function startProgressPolling() {
+        document.getElementById('progress_wrapper').style.display = 'block';
+        document.getElementById('progress_bar_fill').style.width = '0%';
+        document.getElementById('progress_pct_text').innerText = '0%';
+        document.getElementById('progress_status').innerText = 'Iniciando Simulación...';
+        
+        progressInterval = setInterval(() => {
+            fetch('/api/progress')
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('progress_bar_fill').style.width = data.percent + '%';
+                document.getElementById('progress_pct_text').innerText = data.percent + '%';
+                document.getElementById('progress_status').innerText = data.message || 'Procesando...';
+            }).catch(e => console.log("Polling delay...", e));
+        }, 500);
+    }
+
+    function stopProgressPolling() {
+        if(progressInterval) { 
+            clearInterval(progressInterval); 
+            progressInterval = null; 
+        }
+        setTimeout(() => { document.getElementById('progress_wrapper').style.display = 'none'; }, 2000);
     }
 
     function runSimulation(isCompareMode = false) {
@@ -1011,6 +1243,7 @@
         btnStop.style.display = 'block';
 
         currentAbortController = new AbortController();
+        startProgressPolling();
 
         fetch('/api/run_simulation', { 
             method: 'POST', 
@@ -1021,6 +1254,7 @@
         .then(r => r.json())
         .then(data => {
             btn.innerHTML = "▶ Simular"; btn.disabled = false; btnStop.style.display = 'none';
+            stopProgressPolling();
             if(data.status === 'ok') { 
                 window.lastResults = data; 
                 try {
@@ -1034,6 +1268,7 @@
             else { alert("Error en el Servidor:\n" + data.msg); }
         })
         .catch(e => { 
+            stopProgressPolling();
             if(e.name === 'AbortError') {
                 showStatusMessage("Simulación cancelada", "red");
             } else {
@@ -1049,7 +1284,11 @@
     function renderResults(data, payload) {
         const workspace = document.getElementById('results_dynamic_area');
         const dlContainer = document.getElementById('downloads_container');
-        if (!workspace || !dlContainer) throw new Error("No se encontraron los contenedores HTML para dibujar.");
+        
+        if (!workspace || !dlContainer) {
+            alert("Error Crítico: No se encontraron los contenedores HTML (results_dynamic_area o downloads_container) para dibujar los resultados. Asegúrate de haber copiado el archivo simulation.html completamente sin cortar el final.");
+            throw new Error("Contenedores HTML faltantes.");
+        }
         
         workspace.innerHTML = ''; dlContainer.innerHTML = '';
 
@@ -1072,7 +1311,7 @@
                             const imgData = data.results_by_kd[kd].depths[depth];
                             if(imgData && imgData.image) {
                                 html += `<div class="kd-card">
-                                            <div class="kd-card-title">ESCENARIO: KD = ${kd}</div>
+                                            <div class="kd-card-title">ESCENARIO: ${kd}</div>
                                             <img src="data:image/png;base64,${imgData.image}">
                                          </div>`;
                             }
@@ -1094,7 +1333,7 @@
             htmlTablas += `<h4 style="color:#333; margin-bottom:10px; text-transform: uppercase;">Aporte lumínico en puntos específicos</h4>
                            <div style="overflow-x:auto; margin-bottom: 30px;">
                            <table class="summary-table">
-                           <tr><th>PUNTO (X,Y,Z)</th><th>KD</th><th>TOTAL (W/m²)</th><th>LÁMPARA</th><th>APORTE (W/m² | %)</th></tr>`;
+                           <tr><th>PUNTO (X,Y,Z)</th><th>ESCENARIO</th><th>TOTAL (W/m²)</th><th>LÁMPARA</th><th>APORTE (W/m² | %)</th></tr>`;
             data.kds.forEach(kd => {
                 if(data.results_by_kd[kd] && data.results_by_kd[kd].aportes) {
                     data.results_by_kd[kd].aportes.forEach(ap => {
@@ -1123,7 +1362,7 @@
         htmlTablas += `<h4 style="color:#333; margin-bottom:10px; text-transform: uppercase;">Resumen comparativo de escenarios</h4>
                        <div style="overflow-x:auto;">
                        <table class="summary-table">
-                       <tr><th>KD</th><th>DISCO SECCHI EQ.</th><th>PROMEDIO (W/m²)</th><th>MÁX (W/m²)</th><th>MÍN (W/m²)</th><th>VOLUMEN ILUM (%)</th>`;
+                       <tr><th>ESCENARIO</th><th>DISCO SECCHI EQ.</th><th>PROMEDIO (W/m²)</th><th>MÁX (W/m²)</th><th>MÍN (W/m²)</th><th>VOLUMEN ILUM (%)</th>`;
         if (summaryCols.lamps) htmlTablas += `<th>LÁMPARA</th>`;
         if (summaryCols.pos) htmlTablas += `<th>POSICIÓN (X,Y,Z)</th>`;
         if (summaryCols.power) htmlTablas += `<th>POTENCIA (W)</th>`;
@@ -1155,8 +1394,7 @@
                         htmlTablas += `<td>(${lamp.x}, ${lamp.y}, ${lamp.z})</td>`;
                     }
                     if (summaryCols.power) {
-                        let effectivePower = (lamp.power * lamp.dim).toFixed(1);
-                        htmlTablas += `<td>${effectivePower}</td>`;
+                        htmlTablas += `<td>${lamp.power}</td>`;
                     }
                     htmlTablas += `</tr>`;
                 });
@@ -1172,13 +1410,16 @@
 
         if (data.kds && data.kds.length > 0) {
             data.kds.forEach(kd => {
-                if (data.results_by_kd && data.results_by_kd[kd] && data.results_by_kd[kd].depth_profile_image) {
-                    const dpDiv = document.createElement('div');
-                    dpDiv.className = 'graph-wrapper result-graph';
-                    dpDiv.style.width = "100%";
-                    dpDiv.innerHTML = `<h4 style="color:#333; margin-bottom:10px; text-transform: uppercase;">PERFIL DE PROFUNDIDAD: ÁREA Y VOLUMEN (KD = ${kd})</h4>
-                                       <div style="text-align:center;"><img src="data:image/png;base64,${data.results_by_kd[kd].depth_profile_image}" style="max-width:100%;"></div>`;
-                    workspace.appendChild(dpDiv);
+                if (data.results_by_kd && data.results_by_kd[kd]) {
+                    
+                    if (data.results_by_kd[kd].depth_profile_image) {
+                        const dpDiv = document.createElement('div');
+                        dpDiv.className = 'graph-wrapper result-graph';
+                        dpDiv.style.width = "100%";
+                        dpDiv.innerHTML = `<h4 style="color:#333; margin-bottom:10px; text-transform: uppercase;">PERFIL DE PROFUNDIDAD: ÁREA Y VOLUMEN</h4>
+                                           <div style="text-align:center;"><img src="data:image/png;base64,${data.results_by_kd[kd].depth_profile_image}" style="max-width:100%;"></div>`;
+                        workspace.appendChild(dpDiv);
+                    }
                 }
             });
         }
@@ -1203,7 +1444,7 @@
                 const specDiv = document.createElement('div');
                 specDiv.className = 'graph-wrapper result-graph';
                 specDiv.style.width = "100%";
-                specDiv.innerHTML = `<h4 style="color:#333; margin-bottom:10px;">ESPECTRO: ${lamp}</h4>
+                specDiv.innerHTML = `<h4 style="color:#333; margin-bottom:10px;">ANÁLISIS ESPECTRAL Y COLOR SHIFT</h4>
                                      <div style="text-align:center;"><img src="data:image/png;base64,${data.spectrums[lamp]}" style="max-width:100%;"></div>`;
                 workspace.appendChild(specDiv);
             });
@@ -1212,49 +1453,94 @@
         let dlHtml = `<div style="font-weight:bold; font-size:12px; margin-bottom:5px;">GRÁFICOS CONSOLIDADOS</div>`;
         if (data.kds && Array.isArray(data.kds)) {
             data.kds.forEach(kd => {
-                dlHtml += `<button class="btn-download" onclick="downloadCombined('${kd}')">📄 CONSOLIDADO KD=${kd}</button>`;
+                dlHtml += `<button class="btn-download" onclick="downloadCombined('${kd}')">📄 CONSOLIDADO (ESCENARIO ${kd})</button>`;
             });
         }
         
         dlHtml += `<div style="font-weight:bold; font-size:12px; margin-top:15px; margin-bottom:5px;">GRÁFICOS INDIVIDUALES</div>`;
         dlHtml += `<select id="dl_kd_selector" style="width:100%; font-size:13px; margin-bottom:5px; padding:6px;">`;
         if (data.kds && Array.isArray(data.kds)) {
-            data.kds.forEach(kd => { dlHtml += `<option value="${kd}">ESCENARIO KD = ${kd}</option>`; });
+            data.kds.forEach(kd => { dlHtml += `<option value="${kd}">ESCENARIO: ${kd}</option>`; });
         }
-        dlHtml += `</select><button class="btn-download" style="background:#1f77b4;" onclick="downloadIndividual()">⬇ DESCARGAR INDIVIDUALES</button>`;
-        dlHtml += `<div style="font-size:10px; color:#888; text-align:center; margin-top:10px;">*La ruta dependerá de la configuración "Guardar como" de su navegador.</div>`;
+        dlHtml += `</select><button class="btn-download" style="background:#1f77b4;" onclick="downloadIndividual()">⬇ DESCARGAR CARPETA</button>`;
+        dlHtml += `<div style="font-size:10px; color:#888; text-align:center; margin-top:10px;">Se te pedirá seleccionar una carpeta donde volcar todos los mapas generados de manera masiva.</div>`;
         
         dlContainer.innerHTML = dlHtml;
     }
 
-    function downloadCombined(kd) {
+    async function downloadCombined(kd) {
         if(!window.lastResults || !window.lastResults.results_by_kd || !window.lastResults.results_by_kd[kd]) return;
         const img = window.lastResults.results_by_kd[kd].combined_image;
         if(img) {
-            const a = document.createElement('a');
-            a.href = "data:image/png;base64," + img;
-            a.download = `Irradiancia_Consolidada_Kd${kd}.png`;
-            a.click();
+            const filename = `Irradiancia_Consolidada_${kd}.png`;
+            try {
+                if (window.showSaveFilePicker) {
+                    const handle = await window.showSaveFilePicker({
+                        suggestedName: filename,
+                        types: [{ description: 'PNG Image', accept: {'image/png': ['.png']} }]
+                    });
+                    const writable = await handle.createWritable();
+                    const response = await fetch("data:image/png;base64," + img);
+                    await writable.write(await response.blob());
+                    await writable.close();
+                    showStatusMessage("Gráfico guardado correctamente");
+                } else {
+                    throw new Error("API no soportada");
+                }
+            } catch (e) {
+                if(e.name !== 'AbortError') {
+                    // Fallback para navegadores antiguos
+                    const a = document.createElement('a');
+                    a.href = "data:image/png;base64," + img;
+                    a.download = filename;
+                    a.click();
+                }
+            }
         }
     }
 
-    function downloadIndividual() {
+    async function downloadIndividual() {
         if(!window.lastResults || !window.lastResults.results_by_kd) return;
         const kd = document.getElementById('dl_kd_selector').value;
         const depths = window.lastResults.results_by_kd[kd].depths;
         if (!depths) return;
         
-        Object.keys(depths).forEach((d, i) => {
-            setTimeout(() => {
-                const img = depths[d].image;
-                if(img) {
-                    const a = document.createElement('a');
-                    a.href = "data:image/png;base64," + img;
-                    a.download = `Irradiancia_Kd${kd}_Z${d}m.png`;
-                    a.click();
+        try {
+            if (window.showDirectoryPicker) {
+                const dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+                showStatusMessage("Descargando archivos a la carpeta...", "white");
+                
+                for (const d of Object.keys(depths)) {
+                    const img = depths[d].image;
+                    if(img) {
+                        const filename = `Irradiancia_${kd}_Z${d}m.png`;
+                        const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
+                        const writable = await fileHandle.createWritable();
+                        const response = await fetch("data:image/png;base64," + img);
+                        await writable.write(await response.blob());
+                        await writable.close();
+                    }
                 }
-            }, i * 300); 
-        });
+                showStatusMessage("Mapas extraídos correctamente.");
+            } else {
+                throw new Error("API no soportada");
+            }
+        } catch (e) {
+            if(e.name !== 'AbortError') {
+                // Fallback para navegadores antiguos que no soportan elegir carpetas
+                Object.keys(depths).forEach((d, i) => {
+                    setTimeout(() => {
+                        const img = depths[d].image;
+                        if(img) {
+                            const a = document.createElement('a');
+                            a.href = "data:image/png;base64," + img;
+                            a.download = `Irradiancia_${kd}_Z${d}m.png`;
+                            a.click();
+                        }
+                    }, i * 300); 
+                });
+            }
+        }
     }
 
     async function saveConfiguration() {
@@ -1310,11 +1596,13 @@
                         document.getElementById('z_water_container').style.display = 'block';
                         document.getElementById('env_n1_container').style.display = 'block';
                         document.getElementById('env_n2_label').innerHTML = '<strong>Índice ref. medio 2</strong> <span class="normal-case">(Agua)</span>';
+                        document.getElementById('wall_albedo_container').style.display = 'block';
                     } else {
                         document.getElementById('env_z_container').style.display = 'block';
                         document.getElementById('z_water_container').style.display = 'none';
                         document.getElementById('env_n1_container').style.display = 'none';
                         document.getElementById('env_n2_label').innerHTML = '<strong>Índice ref. medio</strong> <span class="normal-case">(Agua)</span>';
+                        document.getElementById('wall_albedo_container').style.display = 'none';
                     }
                     toggleShapePanel();
                 }
@@ -1343,6 +1631,30 @@
                     }
                 }
 
+                if(config.optics_mode) {
+                    document.getElementById('optics_mode').value = config.optics_mode;
+                    toggleOpticsPanel();
+                }
+                
+                if(config.optics) {
+                    if (config.optics.kd_spectral) document.getElementById('kd_spectral_json').value = JSON.stringify(config.optics.kd_spectral);
+                    if (config.optics.c) document.getElementById('scatter_c').value = config.optics.c;
+                    if (config.optics.omega) document.getElementById('scatter_omega').value = config.optics.omega;
+                    if (config.optics.g) document.getElementById('scatter_g').value = config.optics.g;
+                    if (config.optics.r_wall) document.getElementById('scatter_rwall').value = config.optics.r_wall;
+                    
+                    if (config.optics.mc_input_type) {
+                        document.getElementById('mc_input_type').value = config.optics.mc_input_type;
+                    }
+                    if (config.optics.tss !== undefined) document.getElementById('scat_tss').value = config.optics.tss;
+                    if (config.optics.cdom_a440 !== undefined) document.getElementById('scat_cdom').value = config.optics.cdom_a440;
+                    
+                    toggleScatteringMode();
+
+                    if (config.optics.c_json) document.getElementById('scatter_c_json').value = JSON.stringify(config.optics.c_json);
+                    if (config.optics.omega_json) document.getElementById('scatter_omega_json').value = JSON.stringify(config.optics.omega_json);
+                }
+
                 if(config.target_depths) document.getElementById('target_depths').value = config.target_depths.join(', ');
                 if(config.rays) document.getElementById('rays_count').value = config.rays;
                 if(config.kd_list) document.getElementById('kd_list').value = config.kd_list.join(', ');
@@ -1351,14 +1663,23 @@
                 if(config.draw_contour !== undefined) document.getElementById('draw_contour').checked = config.draw_contour;
                 if(config.contour_val !== undefined) document.getElementById('contour_val').value = config.contour_val;
                 if(config.color_scale_type !== undefined) document.getElementById('color_scale_type').value = config.color_scale_type;
-
+                
                 if(config.plot_depth_profile !== undefined) document.getElementById('plot_depth_profile').checked = config.plot_depth_profile;
                 if(config.profile_step !== undefined) document.getElementById('profile_step').value = config.profile_step;
                 
-                if(config.plot_spectrum !== undefined) {
-                    document.getElementById('plot_spectrum').checked = config.plot_spectrum;
-                    toggleSpectrumPanel();
+                if(config.plot_spectrum_initial !== undefined) document.getElementById('plot_spectrum_initial').checked = config.plot_spectrum_initial;
+                if(config.plot_spectrum_attenuation !== undefined) document.getElementById('plot_spectrum_attenuation').checked = config.plot_spectrum_attenuation;
+                if(config.plot_spectrum_normalized !== undefined) document.getElementById('plot_spectrum_normalized').checked = config.plot_spectrum_normalized;
+                
+                // Mantenimiento de compatibilidad con archivos guardados previamente
+                if(config.plot_spectrum !== undefined && config.plot_spectrum_initial === undefined) {
+                    document.getElementById('plot_spectrum_initial').checked = config.plot_spectrum;
+                    document.getElementById('plot_spectrum_attenuation').checked = config.plot_spectrum;
+                    document.getElementById('plot_spectrum_normalized').checked = config.plot_spectrum;
                 }
+
+                toggleSpectrumPanel();
+
                 if(config.spectrum_ranges) {
                     document.getElementById('spec_b_min').value = config.spectrum_ranges.blue[0];
                     document.getElementById('spec_b_max').value = config.spectrum_ranges.blue[1];
@@ -1385,12 +1706,16 @@
                             <div style="font-weight:900; color:#1a252f; margin-bottom:8px; text-transform: uppercase; font-size: 13px;">${lampCount}. ${lamp.xml}</div>
                             <button type="button" class="btn-remove" onclick="removeLamp(${lampCount})">×</button>
                             <input type="hidden" class="lamp-xml" value="${lamp.xml}">
-                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 12px;">
+                            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; font-size: 12px;">
                                 <div><strong>X:</strong> <input type="number" class="lamp-x" value="${lamp.x}" style="width:100%; padding:5px;" oninput="updateScene()"></div>
                                 <div><strong>Y:</strong> <input type="number" class="lamp-y" value="${lamp.y}" style="width:100%; padding:5px;" oninput="updateScene()"></div>
-                                <div style="grid-column: span 2;" class="z-label-container"><strong>${zLabelText}:</strong> <input type="number" class="lamp-z" value="${lamp.z}" style="width:100%; padding:5px;" oninput="updateScene()"></div>
-                                <div style="grid-column: span 2;"><strong>Potencia nominal (W)*:</strong> <input type="number" class="lamp-power" value="${lamp.power || 600}" style="width:100%; padding:5px;"></div>
-                                <div><strong>Dim:</strong> <input type="number" class="lamp-dim" value="${lamp.dim}" step="0.1" max="1" style="width:100%; padding:5px;"></div>
+                                <div><strong>${zLabelText}:</strong> <input type="number" class="lamp-z" value="${lamp.z}" style="width:100%; padding:5px;" oninput="updateScene()"></div>
+                                
+                                <div style="grid-column: span 3; background:#fffae6; padding: 5px; border-radius: 4px; border: 1px solid var(--evolux-yellow);">
+                                    <strong>Potencia nominal y de operación (W):</strong> 
+                                    <input type="number" class="lamp-power" value="${lamp.power || 600}" style="width:100%; padding:5px;">
+                                </div>
+                                
                                 <div><strong>Rot X°:</strong> <input type="number" class="lamp-rot-x" value="${lamp.rot_x || 0}" style="width:100%; padding:5px;" oninput="updateScene()"></div>
                                 <div><strong>Rot Y°:</strong> <input type="number" class="lamp-rot-y" value="${lamp.rot_y || 0}" style="width:100%; padding:5px;" oninput="updateScene()"></div>
                                 <div><strong>Rot Z°:</strong> <input type="number" class="lamp-rot-z" value="${lamp.rot_z || 0}" style="width:100%; padding:5px;" oninput="updateScene()"></div>
