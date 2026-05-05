@@ -40,6 +40,28 @@ UPLOAD_FOLDER = './uploaded_lamps'
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
+def wavelength_to_rgb(wavelength):
+    """Convierte longitud de onda (nm) a un color RGB para las gráficas"""
+    wavelength = float(wavelength)
+    if wavelength >= 380 and wavelength <= 440:
+        attenuation = 0.3 + 0.7 * (wavelength - 380) / (440 - 380)
+        R = (-(wavelength - 440) / (440 - 380)) * attenuation
+        G, B = 0.0, 1.0 * attenuation
+    elif wavelength >= 440 and wavelength <= 490:
+        R, G, B = 0.0, (wavelength - 440) / (490 - 440), 1.0
+    elif wavelength >= 490 and wavelength <= 510:
+        R, G, B = 0.0, 1.0, -(wavelength - 510) / (510 - 490)
+    elif wavelength >= 510 and wavelength <= 580:
+        R, G, B = (wavelength - 510) / (580 - 510), 1.0, 0.0
+    elif wavelength >= 580 and wavelength <= 645:
+        R, G, B = 1.0, -(wavelength - 645) / (645 - 580), 0.0
+    elif wavelength >= 645 and wavelength <= 750:
+        attenuation = 0.3 + 0.7 * (750 - wavelength) / (750 - 645)
+        R, G, B = 1.0 * attenuation, 0.0, 0.0
+    else:
+        R, G, B = 0.0, 0.0, 0.0
+    return (R, G, B)
+
 @app.route('/')
 def index():
     return render_template('simulation.html')
@@ -180,8 +202,24 @@ def _plot_map_on_ax(ax, E, X, Y, config, env_type, center_x, center_y, env_radio
             circ = plt.Circle((float(roi['cx']), float(roi['cy'])), float(roi['r']), edgecolor='magenta', facecolor='none', linestyle='-.', linewidth=2.5)
             ax.add_patch(circ)
 
+    # Identificación diferenciada de lámparas en el mapa 2D
+    z_iface = float(config.get('env', {}).get('z_interface', 0))
+    seen_aerial = seen_sub = False
     for lamp in config.get('lamps', []):
-        ax.plot(float(lamp['x']), float(lamp['y']), marker='*', color='yellow', markeredgecolor='black', markersize=10)
+        lz = float(lamp['z'])
+        is_aerial = (env_type == 'estanque' and lz > z_iface) or (env_type == 'jaula' and lz < 0)
+        if is_aerial:
+            ax.plot(float(lamp['x']), float(lamp['y']), marker='D', color='#FFD700',
+                    markeredgecolor='black', markersize=9, zorder=5,
+                    label='Lámpara aérea' if not seen_aerial else '')
+            seen_aerial = True
+        else:
+            ax.plot(float(lamp['x']), float(lamp['y']), marker='*', color='#00BFFF',
+                    markeredgecolor='black', markersize=13, zorder=5,
+                    label='Lámpara sumergida' if not seen_sub else '')
+            seen_sub = True
+    if seen_aerial or seen_sub:
+        ax.legend(loc='upper right', fontsize=8, framealpha=0.8)
 
     ax.set_aspect('equal')
     ax.set_xlim(0, env_x)
@@ -230,7 +268,7 @@ def run_simulation():
             if mc_input_type == 'scalar':
                 c_att = config.get('optics', {}).get('c')
                 kds_requested = [float(c_att) if c_att is not None else 0.5] 
-            else: # bio o json
+            else: 
                 kds_requested = [0.0] 
         else:
             kds_requested = [0.0] 
@@ -257,7 +295,7 @@ def run_simulation():
         all_depths_requested = sorted(list(all_depths_set), reverse=True)
         config['target_depths'] = all_depths_requested
         
-        # --- PRE-PROCESAMIENTO DE POTENCIA (DIMMING AUTOMÁTICO) ---
+        # --- PRE-PROCESAMIENTO DE POTENCIA (DIMMING AUTOMÁTICO VÍA POTENCIA NOMINAL) ---
         for lamp in config.get('lamps', []):
             req_power = float(lamp.get('power', 0.0))
             if req_power <= 0.0:
@@ -283,9 +321,10 @@ def run_simulation():
         results_by_kd = {}
         table_data = []
         spectrum_results = {}
+        scenario_names = {} 
         lamps_names = [lamp['xml'] for lamp in config.get('lamps', [])]
         
-        # --- ESPECTRO INICIAL FUERA DEL BUCLE ---
+        # Generar espectro inicial 
         if config.get('plot_spectrum_initial'):
             ranges = config.get('spectrum_ranges', {'blue': [400, 499], 'green': [500, 599], 'red': [600, 750]})
             for xml_name in config.get('spectrum_lamps', []):
@@ -313,6 +352,11 @@ def run_simulation():
                                 pct = (trapz_func(pwrs[mask], wls[mask]) / total_auc) * 100
                                 ax_spec.fill_between(wls, pwrs, where=mask, color=colors.get(color_name, 'gray'), alpha=0.3, label=rf"{labels_es.get(color_name, color_name)} ({w_min}-{w_max}nm): {pct:.1f}%")
                         
+                        for wl_i in range(len(wls)-1):
+                            if 380 <= wls[wl_i] <= 780:
+                                c_rgb = wavelength_to_rgb(wls[wl_i])
+                                ax_spec.axvspan(wls[wl_i], wls[wl_i+1], ymin=0, ymax=0.035, color=c_rgb, alpha=0.7, zorder=1)
+
                         ax_spec.set_title(rf"Espectro absoluto inicial (0m) - {xml_name}")
                         ax_spec.set_xlabel(r"Longitud de onda $[nm]$")
                         ax_spec.set_ylabel(r"Potencia radiométrica relativa")
@@ -336,6 +380,8 @@ def run_simulation():
         for kd_val in kds_requested:
             kd_val = float(kd_val)
             
+            kd_res = {"depths": {}, "combined_image": "", "comparison_image": "", "depth_profile_image": "", "env_optics_image": "", "aportes": []}
+
             if 'optics' not in config: config['optics'] = {}
             config['optics']['mode'] = optics_mode 
             
@@ -344,8 +390,91 @@ def run_simulation():
             elif optics_mode == 'scattering' and config['optics'].get('mc_input_type') == 'scalar': 
                 config['optics']['c'] = kd_val
             
-            # --- GENERACIÓN DE GRÁFICOS DE ATENUACIÓN ESPECTRAL POR ESCENARIO ---
-            if config.get('plot_spectrum_attenuation') or config.get('plot_spectrum_normalized'):
+            mc_input_type = config.get('optics', {}).get('mc_input_type', 'scalar')
+            if optics_mode == 'kd_fijo':
+                titulo_escenario = f"Kd={kd_val}" 
+            elif optics_mode == 'kd_espectral':
+                titulo_escenario = "Kd Espectral (Manual)"
+            elif optics_mode == 'scattering' and mc_input_type == 'bio':
+                titulo_escenario = f"Bio-Óptico (TSS={config['optics'].get('tss', 15.0)}mg/L, CDOM a(440)={config['optics'].get('cdom_a440', 1.0)})"
+            elif optics_mode == 'scattering' and mc_input_type == 'json':
+                titulo_escenario = "Dispersión Espectral Manual"
+            else:
+                titulo_escenario = f"Atenuación Escalar c={kd_val}"
+                
+            scenario_names[str(kd_val)] = titulo_escenario
+            
+            # --- GENERACIÓN DE GRÁFICO DE CARACTERIZACIÓN ÓPTICA DEL MEDIO ---
+            if config.get('plot_env_optics'):
+                wls_env = np.linspace(380, 780, 400)
+                kd_env_plot = np.zeros_like(wls_env)
+
+                if optics_mode == 'kd_fijo':
+                    kd_env_plot = np.full_like(wls_env, kd_val)
+                    y_label_env = "Kd Fijo [1/m]"
+                elif optics_mode == 'kd_espectral':
+                    kd_spectral_dict = config.get('optics', {}).get('kd_spectral', {})
+                    if kd_spectral_dict:
+                        kd_wls = np.array([float(k) for k in sorted(kd_spectral_dict.keys())])
+                        kd_vals = np.array([float(kd_spectral_dict[k]) for k in sorted(kd_spectral_dict.keys())])
+                        if len(kd_wls) > 0:
+                            kd_env_plot = np.interp(wls_env, kd_wls, kd_vals)
+                    y_label_env = "Kd Espectral [1/m]"
+                elif optics_mode == 'scattering':
+                    if mc_input_type == 'scalar':
+                        kd_env_plot = np.full_like(wls_env, kd_val)
+                        y_label_env = "Atenuación del haz (c) [1/m]"
+                    elif mc_input_type == 'bio':
+                        tss_val = float(config.get('optics', {}).get('tss', 15.0))
+                        a440_val = float(config.get('optics', {}).get('cdom_a440', 1.0))
+                        wl_ref = np.array([400, 450, 500, 550, 600, 650, 700])
+                        b_star_ref = np.array([0.50, 0.42, 0.35, 0.31, 0.28, 0.25, 0.22])
+                        aw_ref = np.array([0.01, 0.01, 0.02, 0.06, 0.24, 0.35, 0.65])
+                        spline_b = make_interp_spline(wl_ref, b_star_ref, k=2)
+                        spline_aw = make_interp_spline(wl_ref, aw_ref, k=2)
+                        b_star_ray = np.maximum(spline_b(wls_env), 0)
+                        aw_ray = np.maximum(spline_aw(wls_env), 0)
+                        b_total_ray = b_star_ray * tss_val
+                        a_cdom_ray = a440_val * np.exp(-0.015 * (wls_env - 440))
+                        a_total_ray = aw_ray + a_cdom_ray
+                        kd_env_plot = a_total_ray + b_total_ray
+                        y_label_env = "Atenuación del haz (c) [1/m]"
+                    elif mc_input_type == 'json':
+                        c_dict = config.get('optics', {}).get('c_json', {})
+                        if c_dict:
+                            c_wls = np.array([float(k) for k in sorted(c_dict.keys())])
+                            c_vals = np.array([float(c_dict[k]) for k in sorted(c_dict.keys())])
+                            if len(c_wls) > 0:
+                                kd_env_plot = np.interp(wls_env, c_wls, c_vals)
+                        y_label_env = "Atenuación del haz (c) [1/m]"
+
+                fig_env, ax_env = plt.subplots(figsize=(7, 4))
+                ax_env.plot(wls_env, kd_env_plot, 'k-', linewidth=2.5)
+
+                for wl_i in range(len(wls_env)-1):
+                    if 380 <= wls_env[wl_i] <= 780:
+                        c_rgb = wavelength_to_rgb(wls_env[wl_i])
+                        ax_env.axvspan(wls_env[wl_i], wls_env[wl_i+1], ymin=0, ymax=0.035, color=c_rgb, alpha=0.7, zorder=1)
+
+                ax_env.set_title(rf"Caracterización Óptica del Medio - Escenario: {titulo_escenario}")
+                ax_env.set_xlabel("Longitud de onda [nm]")
+                ax_env.set_ylabel(y_label_env)
+                ax_env.grid(True, linestyle=':', alpha=0.6)
+                ax_env.set_xlim(380, 780)
+                
+                ymin_plot, ymax_plot = np.min(kd_env_plot), np.max(kd_env_plot)
+                if ymin_plot == ymax_plot:
+                    ax_env.set_ylim(max(0, ymin_plot - 0.1), ymax_plot + 0.1)
+                else:
+                    ax_env.set_ylim(max(0, ymin_plot - 0.1), ymax_plot * 1.1)
+
+                buf_env = io.BytesIO()
+                plt.savefig(buf_env, format='png', bbox_inches='tight', transparent=True)
+                plt.close(fig_env)
+                kd_res["env_optics_image"] = base64.b64encode(buf_env.getvalue()).decode('utf-8')
+            
+            # --- GENERACIÓN DE GRÁFICOS DE ATENUACIÓN NORMALIZADA POR ESCENARIO ---
+            if config.get('plot_spectrum_normalized'):
                 for xml_name in config.get('spectrum_lamps', []):
                     parser = engine.parsers.get(xml_name)
                     if parser:
@@ -354,7 +483,6 @@ def run_simulation():
                             wls = np.array(sorted(lamp_spec.keys()))
                             pwrs = np.array([lamp_spec[w] for w in wls])
 
-                            # Calcular la atenuación espectral efectiva según el modo seleccionado
                             kd_interp_plot = np.zeros_like(wls)
                             
                             if optics_mode == 'kd_fijo':
@@ -367,9 +495,8 @@ def run_simulation():
                                     if len(kd_wls) > 0:
                                         kd_interp_plot = np.interp(wls, kd_wls, kd_vals)
                             elif optics_mode == 'scattering':
-                                mc_input_type = config.get('optics', {}).get('mc_input_type', 'scalar')
                                 if mc_input_type == 'scalar':
-                                    kd_interp_plot = np.full_like(wls, kd_val) # kd_val porta el valor de 'c'
+                                    kd_interp_plot = np.full_like(wls, kd_val)
                                 elif mc_input_type == 'bio':
                                     tss_val = float(config.get('optics', {}).get('tss', 15.0))
                                     a440_val = float(config.get('optics', {}).get('cdom_a440', 1.0))
@@ -383,7 +510,6 @@ def run_simulation():
                                     b_total_ray = b_star_ray * tss_val
                                     a_cdom_ray = a440_val * np.exp(-0.015 * (wls - 440))
                                     a_total_ray = aw_ray + a_cdom_ray
-                                    # Para graficar, atenuación efectiva del haz = c
                                     kd_interp_plot = a_total_ray + b_total_ray
                                 elif mc_input_type == 'json':
                                     c_dict = config.get('optics', {}).get('c_json', {})
@@ -393,69 +519,53 @@ def run_simulation():
                                         if len(c_wls) > 0:
                                             kd_interp_plot = np.interp(wls, c_wls, c_vals)
 
-                            if config.get('lamps'):
-                                lamp_z = float(config['lamps'][0]['z'])
-                                ref_z = lamp_z if env_type == 'estanque' else -lamp_z
-                            else:
-                                ref_z = 0.0
+                            lamp_z_ref = 0.0
+                            for l_conf in config.get('lamps', []):
+                                if l_conf.get('xml') == xml_name:
+                                    lamp_z_ref = float(l_conf.get('z', 0))
+                                    break
+                                    
+                            ref_z = lamp_z_ref if env_type == 'estanque' else -lamp_z_ref
 
                             colors_depth = ['#1f77b4', '#d62728', '#2ca02c', '#9467bd', '#8c564b']
                             
-                            titulo_scen = kd_val if optics_mode != 'scattering' or mc_input_type == 'scalar' else (f"TSS={config.get('optics',{}).get('tss', 15.0)}" if mc_input_type == 'bio' else "JSON Espectral")
+                            fig_norm, ax_norm = plt.subplots(figsize=(7, 4))
+                            ax_norm.plot(wls, pwrs / np.max(pwrs), 'k--', label="Emisión inicial", linewidth=2)
 
-                            # 1. Gráfico de Atenuación Absoluta
-                            if config.get('plot_spectrum_attenuation'):
-                                fig_sp_z, ax_sp_z = plt.subplots(figsize=(7, 4))
-                                ax_sp_z.plot(wls, pwrs / np.max(pwrs), 'k--', label="Emisión inicial", linewidth=2)
+                            valid_plots = 0
+                            for d in target_depths_requested:
+                                if valid_plots >= 5: break
+                                target_z = float(d) if env_type == 'estanque' else -float(d)
+                                
+                                # LA LUZ VIAJA HACIA ABAJO: Solo grafica si el objetivo está debajo de la lámpara
+                                if target_z > ref_z: continue
+                                
+                                dist = abs(ref_z - target_z)
+                                trans_pwrs = pwrs * np.exp(-kd_interp_plot * dist)
+                                if np.max(trans_pwrs) > 0:
+                                    ax_norm.plot(wls, trans_pwrs / np.max(trans_pwrs), color=colors_depth[valid_plots % len(colors_depth)], label=f"Z = {d}m (\u0394={dist:.1f}m)", linewidth=2)
+                                valid_plots += 1
+                            
+                            for wl_i in range(len(wls)-1):
+                                if 380 <= wls[wl_i] <= 780:
+                                    c_rgb = wavelength_to_rgb(wls[wl_i])
+                                    ax_norm.axvspan(wls[wl_i], wls[wl_i+1], ymin=0, ymax=0.035, color=c_rgb, alpha=0.7, zorder=1)
 
-                                for idx_d, d in enumerate(target_depths_requested[:5]): 
-                                    target_z = float(d) if env_type == 'estanque' else -float(d)
-                                    dist = abs(ref_z - target_z)
-                                    trans_pwrs = pwrs * np.exp(-kd_interp_plot * dist)
-                                    ax_sp_z.plot(wls, trans_pwrs / np.max(pwrs), color=colors_depth[idx_d % len(colors_depth)], label=f"Z = {d}m (\u0394={dist:.1f}m)", linewidth=2)
+                            ax_norm.set_title(rf"Desplazamiento de color (Normalizado) - {xml_name}")
+                            ax_norm.set_xlabel("Longitud de onda [nm]")
+                            ax_norm.set_ylabel("Espectro auto-normalizado (Máx = 1.0)")
+                            ax_norm.legend(loc='upper right')
+                            ax_norm.grid(True, linestyle=':', alpha=0.6)
+                            ax_norm.set_xlim(380, 780)
+                            ax_norm.set_ylim(0, 1.1)
 
-                                ax_sp_z.set_title(rf"Atenuación absoluta vs profundidad - {xml_name} (Esc: {titulo_scen})")
-                                ax_sp_z.set_xlabel("Longitud de onda [nm]")
-                                ax_sp_z.set_ylabel("Potencia relativa (Referencia = Origen)")
-                                ax_sp_z.legend(loc='upper right')
-                                ax_sp_z.grid(True, linestyle=':', alpha=0.6)
-                                ax_sp_z.set_xlim(380, 780)
-                                ax_sp_z.set_ylim(0, 1.1)
-
-                                buf_sp_z = io.BytesIO()
-                                plt.savefig(buf_sp_z, format='png', bbox_inches='tight', transparent=True)
-                                plt.close(fig_sp_z)
-                                spectrum_results[f"Atenuación Absoluta ({xml_name} - Esc. {kd_val})"] = base64.b64encode(buf_sp_z.getvalue()).decode('utf-8')
-
-                            # 2. Gráfico de Color Shift (Atenuación Normalizada)
-                            if config.get('plot_spectrum_normalized'):
-                                fig_norm, ax_norm = plt.subplots(figsize=(7, 4))
-                                ax_norm.plot(wls, pwrs / np.max(pwrs), 'k--', label="Emisión inicial", linewidth=2)
-
-                                for idx_d, d in enumerate(target_depths_requested[:5]): 
-                                    target_z = float(d) if env_type == 'estanque' else -float(d)
-                                    dist = abs(ref_z - target_z)
-                                    trans_pwrs = pwrs * np.exp(-kd_interp_plot * dist)
-                                    if np.max(trans_pwrs) > 0:
-                                        ax_norm.plot(wls, trans_pwrs / np.max(trans_pwrs), color=colors_depth[idx_d % len(colors_depth)], label=f"Z = {d}m (\u0394={dist:.1f}m)", linewidth=2)
-
-                                ax_norm.set_title(rf"Desplazamiento de color (Normalizado) - {xml_name} (Esc: {titulo_scen})")
-                                ax_norm.set_xlabel("Longitud de onda [nm]")
-                                ax_norm.set_ylabel("Espectro auto-normalizado (Máx = 1.0)")
-                                ax_norm.legend(loc='upper right')
-                                ax_norm.grid(True, linestyle=':', alpha=0.6)
-                                ax_norm.set_xlim(380, 780)
-                                ax_norm.set_ylim(0, 1.1)
-
-                                buf_norm = io.BytesIO()
-                                plt.savefig(buf_norm, format='png', bbox_inches='tight', transparent=True)
-                                plt.close(fig_norm)
-                                spectrum_results[f"Atenuación Normalizada ({xml_name} - Esc. {kd_val})"] = base64.b64encode(buf_norm.getvalue()).decode('utf-8')
+                            buf_norm = io.BytesIO()
+                            plt.savefig(buf_norm, format='png', bbox_inches='tight', transparent=True)
+                            plt.close(fig_norm)
+                            spectrum_results[f"Atenuación Normalizada ({xml_name} - Esc. {kd_val})"] = base64.b64encode(buf_norm.getvalue()).decode('utf-8')
 
 
             raw_results = engine.run(config)
-            
-            kd_res = {"depths": {}, "combined_image": "", "comparison_image": "", "depth_profile_image": "", "aportes": []}
             
             layer_stats = []
             max_irr_all, min_irr_all = -1, 999999
@@ -614,16 +724,6 @@ def run_simulation():
                 avg_all = valid_stats[0]['avg'] if len(valid_stats) > 0 else 0
 
             depths_txt = " y ".join([str(d) for d in target_depths_requested])
-            
-            mc_input_type = config.get('optics', {}).get('mc_input_type', 'scalar')
-            if optics_mode == 'kd_fijo':
-                titulo_escenario = f"Kd={kd_val}" 
-            elif optics_mode == 'scattering' and mc_input_type == 'bio':
-                titulo_escenario = f"Modelo Bio-Óptico (TSS={config['optics'].get('tss', 15.0)}mg/L)"
-            elif optics_mode == 'scattering' and mc_input_type == 'json':
-                titulo_escenario = "Dispersión Espectral Manual"
-            else:
-                titulo_escenario = f"Atenuación Escalar c={kd_val}"
                 
             fig_comb.suptitle(f"Irradiancia simulada a {depths_txt} m del fondo ({titulo_escenario})", fontsize=16, fontfamily='serif')
             buf_comb = io.BytesIO()
@@ -727,10 +827,10 @@ def run_simulation():
                 plt.close(fig_comp)
                 kd_res["comparison_image"] = base64.b64encode(buf_comp.getvalue()).decode('utf-8')
 
+            kd_res["titulo_escenario"] = titulo_escenario
             results_by_kd[str(kd_val)] = kd_res
             min_irr_all = 0 if min_irr_all == 999999 else min_irr_all
             
-            # Recalcular power efectivo final considerando los multiplicadores automáticos
             power_eff = 0
             for l in config.get('lamps', []):
                 req = float(l.get('power', 0))
@@ -744,7 +844,7 @@ def run_simulation():
             else: secchi_eq = 0
 
             table_data.append({
-                "kd": f"{kd_val} ({optics_mode})", "avg": avg_all, "max": max_irr_all, "min": min_irr_all,
+                "kd": titulo_escenario, "avg": avg_all, "max": max_irr_all, "min": min_irr_all,
                 "vol_pct": vol_pct, "power_eff": power_eff, "lamps_str": lamps_str, "pos_str": pos_str, "secchi": secchi_eq
             })
 
@@ -755,7 +855,8 @@ def run_simulation():
             "results_by_kd": results_by_kd,
             "table_data": table_data,
             "spectrums": spectrum_results,
-            "lamps_names": lamps_names
+            "lamps_names": lamps_names,
+            "scenario_names": scenario_names
         })
 
     except Exception as e:
@@ -764,11 +865,13 @@ def run_simulation():
         return jsonify({"status": "error", "msg": str(e)}), 500
 
 if __name__ == '__main__':
+    import threading, webbrowser
     for f in os.listdir(UPLOAD_FOLDER):
         if f.lower().endswith('.xml') or f.lower().endswith('.ies'):
             filepath = os.path.join(UPLOAD_FOLDER, f)
             try:
-                with open(filepath, 'r', encoding='utf-8', errors='ignore') as file: 
+                with open(filepath, 'r', encoding='utf-8', errors='ignore') as file:
                     engine.load_file(f, file.read())
             except Exception: pass
-    app.run(debug=True, port=5001)
+    threading.Timer(1.5, lambda: webbrowser.open('http://localhost:5001')).start()
+    app.run(debug=False, port=5001)
