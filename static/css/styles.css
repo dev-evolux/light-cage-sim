@@ -195,16 +195,18 @@ input[type="number"], input[type="text"], select {
     cursor: pointer;
 }
 
-/* AREA CENTRAL (Gráficos) */
+/* AREA CENTRAL (Gráficos) - CORREGIDO PARA NO APLASTARSE */
 .workspace {
     flex: 1;
     padding: 20px;
     background-color: #e9ecef;
     overflow-y: auto;
-    display: grid !important;
-    grid-template-columns: 1fr 1fr; /* Cuadrícula de 2 columnas para los gráficos */
-    align-content: start;
+    overflow-x: hidden;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
     gap: 20px;
+    min-width: 0;
 }
 
 .graph-wrapper {
